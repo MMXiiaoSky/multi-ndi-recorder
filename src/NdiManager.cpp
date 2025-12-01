@@ -2,21 +2,17 @@
 #include "Logging.h"
 #include <QMutexLocker>
 
+NDIlib_find_instance_t NdiManager::s_finder = nullptr;
+QStringList NdiManager::s_sources;
+QMutex NdiManager::s_mutex;
+
 NdiManager::NdiManager(QObject *parent)
-    : QObject(parent), m_finder(nullptr)
+    : QObject(parent)
 {
     ensureInitialized();
 }
 
-NdiManager::~NdiManager()
-{
-    if (m_finder)
-    {
-        NDIlib_find_destroy(m_finder);
-        m_finder = nullptr;
-    }
-    NDIlib_destroy();
-}
+NdiManager::~NdiManager() = default;
 
 void NdiManager::ensureInitialized()
 {
@@ -24,10 +20,10 @@ void NdiManager::ensureInitialized()
     {
         Logger::instance().log("Failed to initialize NDI");
     }
-    if (!m_finder)
+    if (!s_finder)
     {
-        m_finder = NDIlib_find_create_v2();
-        if (!m_finder)
+        s_finder = NDIlib_find_create_v2();
+        if (!s_finder)
         {
             Logger::instance().log("Failed to create NDI finder");
         }
@@ -36,23 +32,23 @@ void NdiManager::ensureInitialized()
 
 QStringList NdiManager::availableSources()
 {
-    QMutexLocker locker(&m_mutex);
+    QMutexLocker locker(&s_mutex);
     refreshSources();
-    return m_sources;
+    return s_sources;
 }
 
 void NdiManager::refreshSources()
 {
-    if (!m_finder)
+    if (!s_finder)
     {
         ensureInitialized();
     }
     uint32_t no_sources = 0;
-    const NDIlib_source_t *sources = NDIlib_find_get_current_sources(m_finder, &no_sources);
+    const NDIlib_source_t *sources = NDIlib_find_get_current_sources(s_finder, &no_sources);
     QStringList list;
     for (uint32_t i = 0; i < no_sources; ++i)
     {
         list << QString::fromUtf8(sources[i].p_ndi_name);
     }
-    m_sources = list;
+    s_sources = list;
 }
