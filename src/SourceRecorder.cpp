@@ -207,7 +207,7 @@ void SourceRecorder::videoThreadFunc()
                   const bool hasFrameRate = videoFrame.frame_rate_N > 0 && videoFrame.frame_rate_D > 0;
                   cfg.fps = hasFrameRate ? videoFrame.frame_rate_N / videoFrame.frame_rate_D : 60;
                   cfg.inputPixFmt = AV_PIX_FMT_RGBA;
-                  cfg.outputPixFmt = AV_PIX_FMT_YUV444P;
+                  cfg.outputPixFmt = AV_PIX_FMT_YUV420P;
                   if (!m_writer.start(cfg))
                   {
                       m_status = "Error";
