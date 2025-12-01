@@ -16,7 +16,7 @@ public:
 
 private:
     void ensureInitialized();
-    NDIlib_find_instance_t m_finder;
-    QStringList m_sources;
-    QMutex m_mutex;
+    static NDIlib_find_instance_t s_finder;
+    static QStringList s_sources;
+    static QMutex s_mutex;
 };
