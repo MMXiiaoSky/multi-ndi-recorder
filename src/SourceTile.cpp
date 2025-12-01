@@ -33,6 +33,12 @@ void SourceTile::updatePreview()
     if (!frame.isNull())
     {
         ui->previewLabel->setPixmap(QPixmap::fromImage(frame).scaled(ui->previewLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        ui->previewLabel->setText(QString());
+    }
+    else
+    {
+        ui->previewLabel->clear();
+        ui->previewLabel->setText("No preview");
     }
     ui->statusLabel->setText(m_recorder->status());
     int secs = m_recorder->elapsedMs() / 1000;

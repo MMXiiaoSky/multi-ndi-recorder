@@ -125,8 +125,14 @@ bool FfmpegWriter::start(const RecordingConfig &cfg)
     m_cfg = cfg;
     m_segmentIndex = 1;
     QDir().mkpath(cfg.outputFolder);
-    m_currentFile = nextFileName();
-    return openContext(m_currentFile);
+    const QString nextFile = nextFileName();
+    if (!openContext(nextFile))
+    {
+        m_currentFile.clear();
+        return false;
+    }
+    m_currentFile = nextFile;
+    return true;
 }
 
 void FfmpegWriter::closeContext()
