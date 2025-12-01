@@ -5,6 +5,8 @@
 #include <QByteArray>
 #include <QThread>
 #include <QMutexLocker>
+#include <algorithm>
+#include <cmath>
 #include <objbase.h>
 extern "C" {
 #include <libavutil/imgutils.h>
@@ -147,7 +149,7 @@ void SourceRecorder::reconnect()
     NDIlib_recv_create_v3_t recvCreate = {};
     recvCreate.source_to_connect_to = source;
     recvCreate.color_format = NDIlib_recv_color_format_RGBX_RGBA;
-    recvCreate.bandwidth = NDIlib_recv_bandwidth_lowest;
+    recvCreate.bandwidth = NDIlib_recv_bandwidth_highest;
     recvCreate.allow_video_fields = false;
 
     m_recv = NDIlib_recv_create_v3(&recvCreate);
@@ -206,7 +208,10 @@ void SourceRecorder::videoThreadFunc()
                   cfg.width = videoFrame.xres;
                   cfg.height = videoFrame.yres;
                   const bool hasFrameRate = videoFrame.frame_rate_N > 0 && videoFrame.frame_rate_D > 0;
-                  cfg.fps = hasFrameRate ? videoFrame.frame_rate_N / videoFrame.frame_rate_D : 60;
+                  const double fpsValue = hasFrameRate
+                                              ? static_cast<double>(videoFrame.frame_rate_N) / videoFrame.frame_rate_D
+                                              : 0.0;
+                  cfg.fps = fpsValue > 0.0 ? std::max(1, static_cast<int>(std::lround(fpsValue))) : 60;
                   cfg.inputPixFmt = AV_PIX_FMT_RGBA;
                   cfg.outputPixFmt = AV_PIX_FMT_YUV420P;
                   if (!m_writer.start(cfg))
