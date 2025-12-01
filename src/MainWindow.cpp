@@ -42,7 +42,7 @@ void MainWindow::rebuildSources(int count)
 
     for (int i = 0; i < count; ++i)
     {
-        SourceRecorder *rec = new SourceRecorder(this);
+        SourceRecorder *rec = new SourceRecorder(nullptr);
         SourceTile *tile = new SourceTile(this);
         tile->setRecorder(rec);
         connect(tile, &SourceTile::settingsRequested, this, &MainWindow::handleSettings);

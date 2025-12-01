@@ -36,7 +36,7 @@ void SourceRecorder::start()
     m_timer.start();
 
     connect(&m_videoThread, &QThread::started, this, &SourceRecorder::videoThreadFunc);
-    connect(&m_audioThread, &QThread::started, this, &SourceRecorder::audioThreadFunc);
+    connect(&m_audioThread, &QThread::started, this, &SourceRecorder::audioThreadFunc, Qt::DirectConnection);
 
     moveToThread(&m_videoThread);
     m_videoThread.start();
