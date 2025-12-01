@@ -2,6 +2,7 @@
 #include "Logging.h"
 #include <QImage>
 #include <QBuffer>
+#include <QByteArray>
 #include <QThread>
 #include <QMutexLocker>
 #include <objbase.h>
@@ -137,16 +138,24 @@ void SourceRecorder::reconnect()
         NDIlib_recv_destroy(m_recv);
         m_recv = nullptr;
     }
-    NDIlib_recv_create_v3_t recvCreate;
-    recvCreate.source_to_connect_to.p_ndi_name = m_settings.ndiSource.toUtf8().constData();
+
+    QByteArray ndiNameUtf8 = m_settings.ndiSource.toUtf8();
+    NDIlib_source_t source = {};
+    source.p_ndi_name = ndiNameUtf8.constData();
+
+    NDIlib_recv_create_v3_t recvCreate = {};
+    recvCreate.source_to_connect_to = source;
     recvCreate.color_format = NDIlib_recv_color_format_RGBX_RGBA;
     recvCreate.bandwidth = NDIlib_recv_bandwidth_highest;
     recvCreate.allow_video_fields = false;
+
     m_recv = NDIlib_recv_create_v3(&recvCreate);
     if (!m_recv)
     {
         Logger::instance().log("Failed to create NDI receiver for " + m_settings.ndiSource);
         emit errorOccurred("NDI receiver failed");
+        m_running = false;
+        m_status = "Error";
     }
 }
 
