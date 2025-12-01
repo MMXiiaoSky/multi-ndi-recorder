@@ -26,7 +26,12 @@ void SourceSettingsDialog::setSettings(const SourceSettings &settings)
 {
     m_settings = settings;
     ui->ndiCombo->setCurrentText(settings.ndiSource);
+    if (ui->ndiCombo->currentText().isEmpty() && ui->ndiCombo->count() > 0)
+        ui->ndiCombo->setCurrentIndex(0);
+
     ui->audioCombo->setCurrentText(settings.audioDevice);
+    if (ui->audioCombo->currentText().isEmpty() && ui->audioCombo->count() > 0)
+        ui->audioCombo->setCurrentIndex(0);
     ui->labelEdit->setText(settings.label);
     ui->folderEdit->setText(settings.outputFolder);
     ui->segmentSpin->setValue(settings.segmentMinutes);

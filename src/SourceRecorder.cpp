@@ -11,8 +11,9 @@ extern "C" {
 }
 
 SourceRecorder::SourceRecorder(QObject *parent)
-    : QObject(parent), m_running(false), m_paused(false), m_recv(nullptr)
+    : QObject(parent), m_running(false), m_paused(false), m_recv(nullptr), m_pausedDurationMs(0), m_pauseStartMs(0)
 {
+    m_status = "Idle";
 }
 
 SourceRecorder::~SourceRecorder()
@@ -32,8 +33,21 @@ void SourceRecorder::start()
 {
     if (m_running)
         return;
+
+    if (m_settings.ndiSource.isEmpty() || m_settings.audioDevice.isEmpty() || m_settings.outputFolder.isEmpty())
+    {
+        m_status = "Missing settings";
+        emit errorOccurred("Configure NDI source, audio device, and output folder before starting.");
+        return;
+    }
+
     m_running = true;
     m_paused = false;
+    m_pausedDurationMs = 0;
+    m_pauseStartMs = 0;
+    m_status = "Connecting";
+    m_preview = QImage();
+    emit previewUpdated();
     m_timer.start();
 
     connect(&m_videoThread, &QThread::started, this, &SourceRecorder::videoThreadFunc);
@@ -48,6 +62,8 @@ void SourceRecorder::stop()
 {
     m_running = false;
     m_paused = false;
+    m_pausedDurationMs = 0;
+    m_pauseStartMs = 0;
     m_videoThread.quit();
     m_audioThread.quit();
     m_videoThread.wait();
@@ -60,6 +76,11 @@ void SourceRecorder::stop()
     m_writer.stop();
     emit recordingStopped();
     m_status = "Idle";
+    {
+        QMutexLocker locker(&m_mutex);
+        m_preview = QImage();
+    }
+    emit previewUpdated();
 }
 
 void SourceRecorder::pause()
@@ -67,6 +88,7 @@ void SourceRecorder::pause()
     if (!m_running)
         return;
     m_paused = true;
+    m_pauseStartMs = m_timer.elapsed();
     m_status = "Paused";
 }
 
@@ -75,12 +97,18 @@ void SourceRecorder::resume()
     if (!m_running)
         return;
     m_paused = false;
+    m_pausedDurationMs += m_timer.elapsed() - m_pauseStartMs;
+    m_pauseStartMs = 0;
     m_status = "Recording";
 }
 
 qint64 SourceRecorder::elapsedMs() const
 {
-    return m_timer.elapsed();
+    if (!m_running && !m_paused)
+        return 0;
+    if (m_paused)
+        return m_pauseStartMs - m_pausedDurationMs;
+    return m_timer.elapsed() - m_pausedDurationMs;
 }
 
 QImage SourceRecorder::lastFrame() const
@@ -130,26 +158,33 @@ void SourceRecorder::videoThreadFunc()
             // Update preview
             QImage img((uchar *)videoFrame.p_data, videoFrame.xres, videoFrame.yres, QImage::Format_RGBA8888);
             {
-                QMutexLocker locker(&m_mutex);
-                m_preview = img.copy();
-                m_status = "Recording";
+              QMutexLocker locker(&m_mutex);
+              m_preview = img.copy();
+              m_status = "Recording";
             }
             emit previewUpdated();
 
             // Prepare FFmpeg writer if needed
-            if (m_writer.currentFile().isEmpty())
-            {
-                RecordingConfig cfg;
-                cfg.outputFolder = m_settings.outputFolder;
-                cfg.sourceLabel = m_settings.label;
-                cfg.segmented = m_settings.segmented;
-                cfg.segmentMinutes = m_settings.segmentMinutes;
-                cfg.width = videoFrame.xres;
-                cfg.height = videoFrame.yres;
-                cfg.fps = videoFrame.frame_rate_N ? videoFrame.frame_rate_N / videoFrame.frame_rate_D : 30;
-                m_writer.start(cfg);
-                emit recordingStarted(m_writer.currentFile());
-            }
+              if (m_writer.currentFile().isEmpty())
+              {
+                  RecordingConfig cfg;
+                  cfg.outputFolder = m_settings.outputFolder;
+                  cfg.sourceLabel = m_settings.label;
+                  cfg.segmented = m_settings.segmented;
+                  cfg.segmentMinutes = m_settings.segmentMinutes;
+                  cfg.width = videoFrame.xres;
+                  cfg.height = videoFrame.yres;
+                  cfg.fps = videoFrame.frame_rate_N ? videoFrame.frame_rate_N / videoFrame.frame_rate_D : 30;
+                  if (!m_writer.start(cfg))
+                  {
+                      m_status = "Error";
+                      emit errorOccurred("Failed to start writer for " + m_settings.label);
+                      m_running = false;
+                      NDIlib_recv_free_video_v2(m_recv, &videoFrame);
+                      break;
+                  }
+                  emit recordingStarted(m_writer.currentFile());
+              }
 
             AVFrame *frame = av_frame_alloc();
             frame->format = AV_PIX_FMT_RGBA;
