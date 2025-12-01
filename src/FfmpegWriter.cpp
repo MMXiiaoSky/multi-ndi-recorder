@@ -6,8 +6,8 @@
 
 FfmpegWriter::FfmpegWriter()
     : m_fmtCtx(nullptr), m_videoStream(nullptr), m_audioStream(nullptr), m_videoCodecCtx(nullptr),
-      m_audioCodecCtx(nullptr), m_sws(nullptr), m_swr(nullptr), m_startMs(0), m_segmentIndex(1), m_inputWidth(0),
-      m_inputHeight(0), m_inputFormat(AV_PIX_FMT_NONE)
+      m_audioCodecCtx(nullptr), m_sws(nullptr), m_swr(nullptr), m_convertedFrame(nullptr), m_startMs(0), m_segmentIndex(1),
+      m_inputWidth(0), m_inputHeight(0), m_inputFormat(AV_PIX_FMT_NONE)
 {
     avformat_network_init();
 }
@@ -86,7 +86,8 @@ bool FfmpegWriter::openContext(const QString &path)
         m_videoCodecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
     AVDictionary *videoOpts = nullptr;
-    av_dict_set(&videoOpts, "preset", "veryfast", 0);
+    av_dict_set(&videoOpts, "preset", "ultrafast", 0);
+    av_dict_set(&videoOpts, "tune", "zerolatency", 0);
     av_dict_set(&videoOpts, "crf", "23", 0);
 
     if (avcodec_open2(m_videoCodecCtx, videoCodec, &videoOpts) < 0)
@@ -208,6 +209,10 @@ void FfmpegWriter::closeContext()
     {
         swr_free(&m_swr);
     }
+    if (m_convertedFrame)
+    {
+        av_frame_free(&m_convertedFrame);
+    }
 }
 
 void FfmpegWriter::stop()
@@ -236,26 +241,19 @@ bool FfmpegWriter::writeVideoFrame(AVFrame *frame)
         m_inputFormat = (AVPixelFormat)frame->format;
     }
 
-    AVFrame *converted = av_frame_alloc();
-    converted->format = m_videoCodecCtx->pix_fmt;
-    converted->width = m_videoCodecCtx->width;
-    converted->height = m_videoCodecCtx->height;
-    if (av_frame_get_buffer(converted, 0) < 0)
-    {
-        av_frame_free(&converted);
+    if (!ensureConvertedFrame())
         return false;
-    }
-    if (sws_scale(m_sws, frame->data, frame->linesize, 0, frame->height, converted->data, converted->linesize) <= 0)
+    if (av_frame_make_writable(m_convertedFrame) < 0)
+        return false;
+    if (sws_scale(m_sws, frame->data, frame->linesize, 0, frame->height, m_convertedFrame->data, m_convertedFrame->linesize) <= 0)
     {
-        av_frame_free(&converted);
         return false;
     }
 
-    converted->pts = av_rescale_q(frame->pts, m_videoCodecCtx->time_base, m_videoStream->time_base);
+    m_convertedFrame->pts = av_rescale_q(frame->pts, m_videoCodecCtx->time_base, m_videoStream->time_base);
 
-    if (avcodec_send_frame(m_videoCodecCtx, converted) < 0)
+    if (avcodec_send_frame(m_videoCodecCtx, m_convertedFrame) < 0)
     {
-        av_frame_free(&converted);
         return false;
     }
     AVPacket pkt;
@@ -269,12 +267,36 @@ bool FfmpegWriter::writeVideoFrame(AVFrame *frame)
         if (av_interleaved_write_frame(m_fmtCtx, &pkt) < 0)
         {
             av_packet_unref(&pkt);
-            av_frame_free(&converted);
             return false;
         }
         av_packet_unref(&pkt);
     }
-    av_frame_free(&converted);
+    return true;
+}
+
+bool FfmpegWriter::ensureConvertedFrame()
+{
+    if (m_convertedFrame &&
+        (m_convertedFrame->width != m_videoCodecCtx->width || m_convertedFrame->height != m_videoCodecCtx->height ||
+         m_convertedFrame->format != m_videoCodecCtx->pix_fmt))
+    {
+        av_frame_free(&m_convertedFrame);
+    }
+
+    if (!m_convertedFrame)
+    {
+        m_convertedFrame = av_frame_alloc();
+        if (!m_convertedFrame)
+            return false;
+        m_convertedFrame->format = m_videoCodecCtx->pix_fmt;
+        m_convertedFrame->width = m_videoCodecCtx->width;
+        m_convertedFrame->height = m_videoCodecCtx->height;
+        if (av_frame_get_buffer(m_convertedFrame, 32) < 0)
+        {
+            av_frame_free(&m_convertedFrame);
+            return false;
+        }
+    }
     return true;
 }
 

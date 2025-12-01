@@ -45,6 +45,7 @@ private:
     bool openContext(const QString &path);
     void closeContext();
     QString nextFileName();
+    bool ensureConvertedFrame();
 
     RecordingConfig m_cfg;
     AVFormatContext *m_fmtCtx;
@@ -54,6 +55,7 @@ private:
     AVCodecContext *m_audioCodecCtx;
     SwsContext *m_sws;
     SwrContext *m_swr;
+    AVFrame *m_convertedFrame;
     qint64 m_startMs;
     QString m_currentFile;
     QMutex m_mutex;
