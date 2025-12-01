@@ -7,7 +7,11 @@ AudioDeviceManager::AudioDeviceManager(QObject *parent)
     : QObject(parent)
 {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    m_enum.CoCreateInstance(__uuidof(MMDeviceEnumerator));
+    HRESULT hr = m_enum.CoCreateInstance(__uuidof(MMDeviceEnumerator));
+    if (FAILED(hr))
+    {
+        Logger::instance().log("Failed to create MMDeviceEnumerator: " + QString::number(hr, 16));
+    }
     enumerate();
 }
 
@@ -23,20 +27,31 @@ void AudioDeviceManager::enumerate()
     if (!m_enum)
         return;
     CComPtr<IMMDeviceCollection> collection;
-    if (FAILED(m_enum->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &collection)))
+    HRESULT hr = m_enum->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &collection);
+    if (FAILED(hr))
     {
-        Logger::instance().log("Failed to enumerate audio endpoints");
+        Logger::instance().log("Failed to enumerate audio endpoints: " + QString::number(hr, 16));
         return;
     }
     UINT count = 0;
-    collection->GetCount(&count);
+    hr = collection->GetCount(&count);
+    if (FAILED(hr))
+    {
+        Logger::instance().log("Failed to get audio endpoint count: " + QString::number(hr, 16));
+        return;
+    }
     for (UINT i = 0; i < count; ++i)
     {
         CComPtr<IMMDevice> device;
         if (SUCCEEDED(collection->Item(i, &device)))
         {
             CComPtr<IPropertyStore> props;
-            device->OpenPropertyStore(STGM_READ, &props);
+            hr = device->OpenPropertyStore(STGM_READ, &props);
+            if (FAILED(hr) || !props)
+            {
+                Logger::instance().log("Failed to open property store for device " + QString::number(i) + ": " + QString::number(hr, 16));
+                continue;
+            }
             PROPVARIANT varName;
             PropVariantInit(&varName);
             if (SUCCEEDED(props->GetValue(PKEY_Device_FriendlyName, &varName)))
@@ -64,19 +79,26 @@ IMMDevice *AudioDeviceManager::deviceByName(const QString &name)
     if (!m_enum)
         return nullptr;
     CComPtr<IMMDeviceCollection> collection;
-    if (FAILED(m_enum->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &collection)))
+    HRESULT hr = m_enum->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &collection);
+    if (FAILED(hr))
     {
         return nullptr;
     }
     UINT count = 0;
-    collection->GetCount(&count);
+    if (FAILED(collection->GetCount(&count)))
+    {
+        return nullptr;
+    }
     for (UINT i = 0; i < count; ++i)
     {
         CComPtr<IMMDevice> device;
         if (SUCCEEDED(collection->Item(i, &device)))
         {
             CComPtr<IPropertyStore> props;
-            device->OpenPropertyStore(STGM_READ, &props);
+            if (FAILED(device->OpenPropertyStore(STGM_READ, &props)) || !props)
+            {
+                continue;
+            }
             PROPVARIANT varName;
             PropVariantInit(&varName);
             if (SUCCEEDED(props->GetValue(PKEY_Device_FriendlyName, &varName)))
