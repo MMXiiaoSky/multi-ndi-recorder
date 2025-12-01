@@ -4,8 +4,10 @@
 #include <QBuffer>
 #include <QThread>
 #include <QMutexLocker>
+extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/channel_layout.h>
+}
 
 SourceRecorder::SourceRecorder(QObject *parent)
     : QObject(parent), m_running(false), m_paused(false), m_recv(nullptr)
