@@ -19,7 +19,8 @@ struct RecordingConfig
     int width = 1920;
     int height = 1080;
     int fps = 30;
-    AVPixelFormat pixFmt = AV_PIX_FMT_YUV420P;
+    AVPixelFormat inputPixFmt = AV_PIX_FMT_RGBA;
+    AVPixelFormat outputPixFmt = AV_PIX_FMT_YUV444P;
     int audioSampleRate = 48000;
     AVSampleFormat audioSampleFmt = AV_SAMPLE_FMT_FLTP;
     int audioChannels = 2;
@@ -57,4 +58,7 @@ private:
     QString m_currentFile;
     QMutex m_mutex;
     int m_segmentIndex;
+    int m_inputWidth;
+    int m_inputHeight;
+    AVPixelFormat m_inputFormat;
 };
