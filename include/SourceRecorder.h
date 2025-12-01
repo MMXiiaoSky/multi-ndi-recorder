@@ -4,6 +4,7 @@
 #include <QThread>
 #include <QAtomicInteger>
 #include <QElapsedTimer>
+#include <QMutex>
 #include "FfmpegWriter.h"
 #include "NdiManager.h"
 #include "AudioDeviceManager.h"
@@ -50,6 +51,7 @@ private:
     void reconnect();
 
     mutable QMutex m_mutex;
+    mutable QMutex m_stateMutex;
     SourceSettings m_settings;
     FfmpegWriter m_writer;
     QThread m_videoThread;

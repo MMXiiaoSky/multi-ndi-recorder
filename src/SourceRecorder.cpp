@@ -59,8 +59,11 @@ void SourceRecorder::start()
     m_recordingStarted = false;
     m_videoPts = 0;
     m_firstTimestamp = NDIlib_recv_timestamp_undefined;
-    m_pausedDurationMs = 0;
-    m_pauseStartMs = 0;
+    {
+        QMutexLocker stateLocker(&m_stateMutex);
+        m_pausedDurationMs = 0;
+        m_pauseStartMs = 0;
+    }
     m_previewThrottle.invalidate();
     m_status = "Connecting";
     {
@@ -82,8 +85,11 @@ void SourceRecorder::stop()
     m_running = false;
     m_paused = false;
     m_recordingStarted = false;
-    m_pausedDurationMs = 0;
-    m_pauseStartMs = 0;
+    {
+        QMutexLocker stateLocker(&m_stateMutex);
+        m_pausedDurationMs = 0;
+        m_pauseStartMs = 0;
+    }
     m_videoThread.quit();
     m_audioThread.quit();
     m_videoThread.wait();
@@ -108,7 +114,10 @@ void SourceRecorder::pause()
     if (!m_running || !m_recordingStarted)
         return;
     m_paused = true;
-    m_pauseStartMs = m_timer.elapsed();
+    {
+        QMutexLocker stateLocker(&m_stateMutex);
+        m_pauseStartMs = m_timer.elapsed();
+    }
     m_status = "Paused";
 }
 
@@ -117,8 +126,11 @@ void SourceRecorder::resume()
     if (!m_running || !m_recordingStarted)
         return;
     m_paused = false;
-    m_pausedDurationMs += m_timer.elapsed() - m_pauseStartMs;
-    m_pauseStartMs = 0;
+    {
+        QMutexLocker stateLocker(&m_stateMutex);
+        m_pausedDurationMs += m_timer.elapsed() - m_pauseStartMs;
+        m_pauseStartMs = 0;
+    }
     m_status = "Recording";
 }
 
@@ -126,6 +138,7 @@ qint64 SourceRecorder::elapsedMs() const
 {
     if ((!m_running && !m_paused) || !m_recordingStarted)
         return 0;
+    QMutexLocker stateLocker(&m_stateMutex);
     if (m_paused)
         return m_pauseStartMs - m_pausedDurationMs;
     return m_timer.elapsed() - m_pausedDurationMs;
@@ -253,8 +266,13 @@ void SourceRecorder::videoThreadFunc()
             {
                 if (m_firstTimestamp == NDIlib_recv_timestamp_undefined)
                     m_firstTimestamp = videoFrame.timestamp;
-                const int64_t delta = videoFrame.timestamp - m_firstTimestamp;
-                ptsValue = av_rescale_q(delta, AVRational{1, 10000000}, timeBase);
+                qint64 pausedDurationTicks = 0;
+                {
+                    QMutexLocker stateLocker(&m_stateMutex);
+                    pausedDurationTicks = m_pausedDurationMs * 10000;
+                }
+                const int64_t delta = videoFrame.timestamp - m_firstTimestamp - pausedDurationTicks;
+                ptsValue = av_rescale_q(std::max<int64_t>(0, delta), AVRational{1, 10000000}, timeBase);
             }
             frame->pts = ptsValue;
             m_writer.writeVideoFrame(frame);
