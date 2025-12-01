@@ -19,6 +19,8 @@ struct RecordingConfig
     int width = 1920;
     int height = 1080;
     int fps = 30;
+    int fpsNum = 30;
+    int fpsDen = 1;
     AVPixelFormat inputPixFmt = AV_PIX_FMT_RGBA;
     AVPixelFormat outputPixFmt = AV_PIX_FMT_YUV420P;
     int audioSampleRate = 48000;

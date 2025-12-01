@@ -61,6 +61,7 @@ private:
     QImage m_preview;
     QString m_status;
     QElapsedTimer m_timer;
+    QElapsedTimer m_previewThrottle;
     NDIlib_recv_instance_t m_recv;
     AudioDeviceManager m_audioManager;
     qint64 m_pausedDurationMs;
