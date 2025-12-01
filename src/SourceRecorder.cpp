@@ -204,7 +204,8 @@ void SourceRecorder::videoThreadFunc()
                   cfg.segmentMinutes = m_settings.segmentMinutes;
                   cfg.width = videoFrame.xres;
                   cfg.height = videoFrame.yres;
-                  cfg.fps = videoFrame.frame_rate_N ? videoFrame.frame_rate_N / videoFrame.frame_rate_D : 30;
+                  const bool hasFrameRate = videoFrame.frame_rate_N > 0 && videoFrame.frame_rate_D > 0;
+                  cfg.fps = hasFrameRate ? videoFrame.frame_rate_N / videoFrame.frame_rate_D : 60;
                   cfg.inputPixFmt = AV_PIX_FMT_RGBA;
                   cfg.outputPixFmt = AV_PIX_FMT_YUV444P;
                   if (!m_writer.start(cfg))
