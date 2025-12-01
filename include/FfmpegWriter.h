@@ -42,6 +42,7 @@ public:
     void rollover();
 
     QString currentFile() const { return m_currentFile; }
+    AVRational videoTimeBase() const;
 
 private:
     bool openContext(const QString &path);

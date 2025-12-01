@@ -11,6 +11,7 @@
 extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/rational.h>
 }
 
 SourceRecorder::SourceRecorder(QObject *parent)
@@ -57,6 +58,7 @@ void SourceRecorder::start()
     m_paused = false;
     m_recordingStarted = false;
     m_videoPts = 0;
+    m_firstTimestamp = NDIlib_recv_timestamp_undefined;
     m_pausedDurationMs = 0;
     m_pauseStartMs = 0;
     m_previewThrottle.invalidate();
@@ -209,43 +211,52 @@ void SourceRecorder::videoThreadFunc()
             timeoutStreak = 0;
 
             // Prepare FFmpeg writer if needed
-              if (m_writer.currentFile().isEmpty())
-              {
-                  RecordingConfig cfg;
-                  cfg.outputFolder = m_settings.outputFolder;
-                  cfg.sourceLabel = m_settings.label;
-                  cfg.segmented = m_settings.segmented;
-                  cfg.segmentMinutes = m_settings.segmentMinutes;
-                  cfg.width = videoFrame.xres;
-                  cfg.height = videoFrame.yres;
-                  const bool hasFrameRate = videoFrame.frame_rate_N > 0 && videoFrame.frame_rate_D > 0;
-                  const double fpsValue = hasFrameRate
-                                              ? static_cast<double>(videoFrame.frame_rate_N) / videoFrame.frame_rate_D
-                                              : 0.0;
-                  const int fpsInt = fpsValue > 0.0 ? (std::max)(1, static_cast<int>(fpsValue + 0.5)) : 60;
-                  cfg.fps = fpsInt;
-                  cfg.fpsNum = hasFrameRate ? videoFrame.frame_rate_N : fpsInt;
-                  cfg.fpsDen = hasFrameRate ? videoFrame.frame_rate_D : 1;
-                  cfg.inputPixFmt = AV_PIX_FMT_RGBA;
-                  cfg.outputPixFmt = AV_PIX_FMT_YUV420P;
-                  if (!m_writer.start(cfg))
-                  {
-                      m_status = "Error";
-                      emit errorOccurred("Failed to start writer for " + m_settings.label);
-                      m_running = false;
-                      NDIlib_recv_free_video_v2(m_recv, &videoFrame);
-                      break;
-                  }
-                  m_videoPts = 0;
-                  emit recordingStarted(m_writer.currentFile());
-              }
+            if (m_writer.currentFile().isEmpty())
+            {
+                RecordingConfig cfg;
+                cfg.outputFolder = m_settings.outputFolder;
+                cfg.sourceLabel = m_settings.label;
+                cfg.segmented = m_settings.segmented;
+                cfg.segmentMinutes = m_settings.segmentMinutes;
+                cfg.width = videoFrame.xres;
+                cfg.height = videoFrame.yres;
+                const bool hasFrameRate = videoFrame.frame_rate_N > 0 && videoFrame.frame_rate_D > 0;
+                const double fpsValue = hasFrameRate
+                                            ? static_cast<double>(videoFrame.frame_rate_N) / videoFrame.frame_rate_D
+                                            : 0.0;
+                const int fpsInt = fpsValue > 0.0 ? (std::max)(1, static_cast<int>(fpsValue + 0.5)) : 60;
+                cfg.fps = fpsInt;
+                cfg.fpsNum = hasFrameRate ? videoFrame.frame_rate_N : fpsInt;
+                cfg.fpsDen = hasFrameRate ? videoFrame.frame_rate_D : 1;
+                cfg.inputPixFmt = AV_PIX_FMT_RGBA;
+                cfg.outputPixFmt = AV_PIX_FMT_YUV420P;
+                if (!m_writer.start(cfg))
+                {
+                    m_status = "Error";
+                    emit errorOccurred("Failed to start writer for " + m_settings.label);
+                    m_running = false;
+                    NDIlib_recv_free_video_v2(m_recv, &videoFrame);
+                    break;
+                }
+                m_videoPts = 0;
+                emit recordingStarted(m_writer.currentFile());
+            }
 
             AVFrame *frame = av_frame_alloc();
             frame->format = AV_PIX_FMT_RGBA;
             frame->width = videoFrame.xres;
             frame->height = videoFrame.yres;
             av_image_fill_arrays(frame->data, frame->linesize, videoFrame.p_data, AV_PIX_FMT_RGBA, videoFrame.xres, videoFrame.yres, 1);
-            frame->pts = m_videoPts++;
+            AVRational timeBase = m_writer.videoTimeBase();
+            qint64 ptsValue = m_videoPts++;
+            if (videoFrame.timestamp != NDIlib_recv_timestamp_undefined && timeBase.num > 0 && timeBase.den > 0)
+            {
+                if (m_firstTimestamp == NDIlib_recv_timestamp_undefined)
+                    m_firstTimestamp = videoFrame.timestamp;
+                const int64_t delta = videoFrame.timestamp - m_firstTimestamp;
+                ptsValue = av_rescale_q(delta, AVRational{1, 10000000}, timeBase);
+            }
+            frame->pts = ptsValue;
             m_writer.writeVideoFrame(frame);
             av_frame_free(&frame);
 
@@ -254,6 +265,7 @@ void SourceRecorder::videoThreadFunc()
             {
                 m_writer.rollover();
                 m_videoPts = 0;
+                m_firstTimestamp = NDIlib_recv_timestamp_undefined;
             }
             break;
         }

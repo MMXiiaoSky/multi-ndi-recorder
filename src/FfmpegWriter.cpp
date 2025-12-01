@@ -148,6 +148,13 @@ bool FfmpegWriter::openContext(const QString &path)
     return true;
 }
 
+AVRational FfmpegWriter::videoTimeBase() const
+{
+    if (m_videoCodecCtx)
+        return m_videoCodecCtx->time_base;
+    return AVRational{1, 1};
+}
+
 bool FfmpegWriter::start(const RecordingConfig &cfg)
 {
     QMutexLocker locker(&m_mutex);
