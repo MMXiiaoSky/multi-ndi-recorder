@@ -81,7 +81,6 @@ bool FfmpegWriter::openContext(const QString &path)
     m_audioCodecCtx->codec_id = AV_CODEC_ID_AAC;
     m_audioCodecCtx->sample_rate = m_cfg.audioSampleRate;
     av_channel_layout_default(&m_audioCodecCtx->ch_layout, m_cfg.audioChannels);
-    m_audioCodecCtx->channels = m_cfg.audioChannels;
     m_audioCodecCtx->sample_fmt = audioCodec->sample_fmts ? audioCodec->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
     m_audioCodecCtx->time_base = {1, m_cfg.audioSampleRate};
     if (m_fmtCtx->oformat->flags & AVFMT_GLOBALHEADER)

@@ -214,14 +214,14 @@ void SourceRecorder::audioThreadFunc()
             AVFrame *frame = av_frame_alloc();
             frame->nb_samples = numFrames;
             av_channel_layout_default(&frame->ch_layout, 2);
-            frame->channels = frame->ch_layout.nb_channels;
             frame->format = AV_SAMPLE_FMT_FLTP;
             frame->sample_rate = mixFormat->nSamplesPerSec;
             av_frame_get_buffer(frame, 0);
 
             // Interleave planar float conversion
             const float *input = reinterpret_cast<const float *>(data);
-            for (int ch = 0; ch < 2; ++ch)
+            const int channels = frame->ch_layout.nb_channels;
+            for (int ch = 0; ch < channels; ++ch)
             {
                 for (uint32_t i = 0; i < numFrames; ++i)
                 {
