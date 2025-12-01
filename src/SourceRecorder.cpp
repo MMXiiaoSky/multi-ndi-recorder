@@ -374,6 +374,7 @@ void SourceRecorder::audioThreadFunc()
     UINT32 packetFrames = 0;
     qint64 pts = 0;
 
+    QString lastWriterFile;
     while (m_running)
     {
         if (m_paused)
@@ -390,6 +391,21 @@ void SourceRecorder::audioThreadFunc()
             {
                 captureClient->ReleaseBuffer(0);
                 continue;
+            }
+
+            const QString writerFile = m_writer.currentFile();
+            if (writerFile.isEmpty())
+            {
+                pts = 0;
+                lastWriterFile.clear();
+                captureClient->ReleaseBuffer(numFrames);
+                continue;
+            }
+
+            if (writerFile != lastWriterFile)
+            {
+                pts = 0;
+                lastWriterFile = writerFile;
             }
 
             AVFrame *frame = av_frame_alloc();

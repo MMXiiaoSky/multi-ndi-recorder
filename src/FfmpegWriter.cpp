@@ -80,7 +80,7 @@ bool FfmpegWriter::openContext(const QString &path)
     m_videoCodecCtx->framerate = {m_cfg.fpsNum, m_cfg.fpsDen};
     m_videoCodecCtx->gop_size = m_cfg.fps;
     m_videoCodecCtx->max_b_frames = 0;
-    m_videoCodecCtx->bit_rate = 0;
+    m_videoCodecCtx->bit_rate = 12000000;
 
     if (m_fmtCtx->oformat->flags & AVFMT_GLOBALHEADER)
         m_videoCodecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -110,6 +110,7 @@ bool FfmpegWriter::openContext(const QString &path)
     av_channel_layout_default(&m_audioCodecCtx->ch_layout, m_cfg.audioChannels);
     m_audioCodecCtx->sample_fmt = audioCodec->sample_fmts ? audioCodec->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
     m_audioCodecCtx->time_base = {1, m_cfg.audioSampleRate};
+    m_audioCodecCtx->bit_rate = 128000;
     if (m_fmtCtx->oformat->flags & AVFMT_GLOBALHEADER)
         m_audioCodecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
