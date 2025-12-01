@@ -14,10 +14,29 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 set(NDI_SDK_INCLUDE "C:/Program Files/NDI SDK/Include" CACHE PATH "Path to NDI SDK include")
 set(NDI_SDK_LIB "C:/Program Files/NDI SDK/Lib/x64" CACHE PATH "Path to NDI SDK lib")
 set(FFMPEG_INCLUDE "C:/ffmpeg/include" CACHE PATH "Path to FFmpeg includes")
-set(FFMPEG_LIB "C:/ffmpeg/lib" CACHE PATH "Path to FFmpeg libraries")
+set(FFMPEG_LIB_ROOT "C:/ffmpeg" CACHE PATH "Path to FFmpeg root (containing lib/bin)")
 
 include_directories(${NDI_SDK_INCLUDE} ${FFMPEG_INCLUDE} include)
-link_directories(${NDI_SDK_LIB} ${FFMPEG_LIB})
+
+set(_ffmpeg_search_paths
+    ${FFMPEG_LIB_ROOT}
+    ${FFMPEG_LIB_ROOT}/lib
+    ${FFMPEG_LIB_ROOT}/bin
+)
+
+find_library(NDI_LIBRARY NAMES Processing.NDI.Lib.x64 PATHS ${NDI_SDK_LIB} PATH_SUFFIXES lib bin)
+find_library(AVFORMAT_LIBRARY NAMES avformat PATHS ${_ffmpeg_search_paths} PATH_SUFFIXES lib bin)
+find_library(AVCODEC_LIBRARY NAMES avcodec PATHS ${_ffmpeg_search_paths} PATH_SUFFIXES lib bin)
+find_library(AVUTIL_LIBRARY NAMES avutil PATHS ${_ffmpeg_search_paths} PATH_SUFFIXES lib bin)
+find_library(SWSCALE_LIBRARY NAMES swscale PATHS ${_ffmpeg_search_paths} PATH_SUFFIXES lib bin)
+find_library(SWRESAMPLE_LIBRARY NAMES swresample PATHS ${_ffmpeg_search_paths} PATH_SUFFIXES lib bin)
+
+if (NOT NDI_LIBRARY)
+    message(FATAL_ERROR "Could not find Processing.NDI.Lib.x64. Set NDI_SDK_LIB to the NDI SDK library directory (lib or bin).")
+endif()
+if (NOT AVFORMAT_LIBRARY)
+    message(FATAL_ERROR "Could not find avformat library. Set FFMPEG_LIB_ROOT to the FFmpeg installation root (containing lib or bin).")
+endif()
 
 file(GLOB SRC_FILES
     src/*.cpp
@@ -28,9 +47,9 @@ add_executable(${PROJECT_NAME} ${SRC_FILES} ui/MainWindow.ui ui/SourceSettingsDi
 target_link_libraries(${PROJECT_NAME}
     Qt6::Widgets
     # NDI SDK
-    Processing.NDI.Lib.x64
+    ${NDI_LIBRARY}
     # FFmpeg
-    avformat avcodec avutil swscale swresample
+    ${AVFORMAT_LIBRARY} ${AVCODEC_LIBRARY} ${AVUTIL_LIBRARY} ${SWSCALE_LIBRARY} ${SWRESAMPLE_LIBRARY}
     # Windows libs
     mfplat mfreadwrite mfuuid strmiids ole32 oleaut32 uuid winmm
 )
