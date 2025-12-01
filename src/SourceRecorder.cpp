@@ -59,6 +59,7 @@ void SourceRecorder::start()
     m_videoPts = 0;
     m_pausedDurationMs = 0;
     m_pauseStartMs = 0;
+    m_previewThrottle.invalidate();
     m_status = "Connecting";
     {
         QMutexLocker locker(&m_mutex);
@@ -182,13 +183,23 @@ void SourceRecorder::videoThreadFunc()
         case NDIlib_frame_type_video:
         {
             // Update preview
-            QImage img((uchar *)videoFrame.p_data, videoFrame.xres, videoFrame.yres, QImage::Format_RGBA8888);
+            const bool shouldUpdatePreview = !m_previewThrottle.isValid() || m_previewThrottle.elapsed() >= 200;
+            if (shouldUpdatePreview)
+            {
+                QImage img((uchar *)videoFrame.p_data, videoFrame.xres, videoFrame.yres, QImage::Format_RGBA8888);
+                {
+                    QMutexLocker locker(&m_mutex);
+                    m_preview = img.copy();
+                    m_status = "Recording";
+                }
+                emit previewUpdated();
+                m_previewThrottle.restart();
+            }
+            else
             {
                 QMutexLocker locker(&m_mutex);
-                m_preview = img.copy();
                 m_status = "Recording";
             }
-            emit previewUpdated();
 
             if (!m_recordingStarted)
             {
@@ -213,6 +224,8 @@ void SourceRecorder::videoThreadFunc()
                                               : 0.0;
                   const int fpsInt = fpsValue > 0.0 ? (std::max)(1, static_cast<int>(fpsValue + 0.5)) : 60;
                   cfg.fps = fpsInt;
+                  cfg.fpsNum = hasFrameRate ? videoFrame.frame_rate_N : fpsInt;
+                  cfg.fpsDen = hasFrameRate ? videoFrame.frame_rate_D : 1;
                   cfg.inputPixFmt = AV_PIX_FMT_RGBA;
                   cfg.outputPixFmt = AV_PIX_FMT_YUV420P;
                   if (!m_writer.start(cfg))

@@ -76,8 +76,8 @@ bool FfmpegWriter::openContext(const QString &path)
             m_videoCodecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
         }
     }
-    m_videoCodecCtx->time_base = {1, m_cfg.fps};
-    m_videoCodecCtx->framerate = {m_cfg.fps, 1};
+    m_videoCodecCtx->time_base = {m_cfg.fpsDen, m_cfg.fpsNum};
+    m_videoCodecCtx->framerate = {m_cfg.fpsNum, m_cfg.fpsDen};
     m_videoCodecCtx->gop_size = m_cfg.fps;
     m_videoCodecCtx->max_b_frames = 0;
     m_videoCodecCtx->bit_rate = 0;
@@ -126,6 +126,8 @@ bool FfmpegWriter::openContext(const QString &path)
 
     m_audioStream->time_base = m_audioCodecCtx->time_base;
     m_videoStream->time_base = m_videoCodecCtx->time_base;
+    m_videoStream->avg_frame_rate = {m_cfg.fpsNum, m_cfg.fpsDen};
+    m_videoStream->r_frame_rate = {m_cfg.fpsNum, m_cfg.fpsDen};
 
     if (!(m_fmtCtx->oformat->flags & AVFMT_NOFILE))
     {
@@ -264,6 +266,7 @@ bool FfmpegWriter::writeVideoFrame(AVFrame *frame)
     {
         pkt.stream_index = m_videoStream->index;
         av_packet_rescale_ts(&pkt, m_videoCodecCtx->time_base, m_videoStream->time_base);
+        pkt.duration = 1;
         if (av_interleaved_write_frame(m_fmtCtx, &pkt) < 0)
         {
             av_packet_unref(&pkt);
