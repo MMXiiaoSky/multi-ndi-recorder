@@ -146,7 +146,7 @@ void SourceRecorder::reconnect()
     NDIlib_recv_create_v3_t recvCreate = {};
     recvCreate.source_to_connect_to = source;
     recvCreate.color_format = NDIlib_recv_color_format_RGBX_RGBA;
-    recvCreate.bandwidth = NDIlib_recv_bandwidth_highest;
+    recvCreate.bandwidth = NDIlib_recv_bandwidth_lowest;
     recvCreate.allow_video_fields = false;
 
     m_recv = NDIlib_recv_create_v3(&recvCreate);
