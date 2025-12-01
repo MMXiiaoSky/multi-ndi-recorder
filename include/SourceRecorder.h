@@ -56,6 +56,7 @@ private:
     QThread m_audioThread;
     QAtomicInteger<bool> m_running;
     QAtomicInteger<bool> m_paused;
+    QAtomicInteger<bool> m_recordingStarted;
     QImage m_preview;
     QString m_status;
     QElapsedTimer m_timer;
