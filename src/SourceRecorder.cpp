@@ -11,7 +11,7 @@ extern "C" {
 }
 
 SourceRecorder::SourceRecorder(QObject *parent)
-    : QObject(parent), m_running(false), m_paused(false), m_recv(nullptr), m_pausedDurationMs(0), m_pauseStartMs(0)
+    : QObject(parent), m_running(false), m_paused(false), m_recordingStarted(false), m_recv(nullptr), m_pausedDurationMs(0), m_pauseStartMs(0)
 {
     m_status = "Idle";
 }
@@ -41,14 +41,26 @@ void SourceRecorder::start()
         return;
     }
 
+    // Validate that the configured NDI source is still available
+    NdiManager ndi;
+    if (!ndi.availableSources().contains(m_settings.ndiSource))
+    {
+        m_status = "Source unavailable";
+        emit errorOccurred("NDI source not found: " + m_settings.ndiSource);
+        return;
+    }
+
     m_running = true;
     m_paused = false;
+    m_recordingStarted = false;
     m_pausedDurationMs = 0;
     m_pauseStartMs = 0;
     m_status = "Connecting";
-    m_preview = QImage();
+    {
+        QMutexLocker locker(&m_mutex);
+        m_preview = QImage();
+    }
     emit previewUpdated();
-    m_timer.start();
 
     connect(&m_videoThread, &QThread::started, this, &SourceRecorder::videoThreadFunc);
     connect(&m_audioThread, &QThread::started, this, &SourceRecorder::audioThreadFunc, Qt::DirectConnection);
@@ -62,6 +74,7 @@ void SourceRecorder::stop()
 {
     m_running = false;
     m_paused = false;
+    m_recordingStarted = false;
     m_pausedDurationMs = 0;
     m_pauseStartMs = 0;
     m_videoThread.quit();
@@ -85,7 +98,7 @@ void SourceRecorder::stop()
 
 void SourceRecorder::pause()
 {
-    if (!m_running)
+    if (!m_running || !m_recordingStarted)
         return;
     m_paused = true;
     m_pauseStartMs = m_timer.elapsed();
@@ -94,7 +107,7 @@ void SourceRecorder::pause()
 
 void SourceRecorder::resume()
 {
-    if (!m_running)
+    if (!m_running || !m_recordingStarted)
         return;
     m_paused = false;
     m_pausedDurationMs += m_timer.elapsed() - m_pauseStartMs;
@@ -104,7 +117,7 @@ void SourceRecorder::resume()
 
 qint64 SourceRecorder::elapsedMs() const
 {
-    if (!m_running && !m_paused)
+    if ((!m_running && !m_paused) || !m_recordingStarted)
         return 0;
     if (m_paused)
         return m_pauseStartMs - m_pausedDurationMs;
@@ -143,6 +156,7 @@ void SourceRecorder::videoThreadFunc()
 
     NDIlib_video_frame_v2_t videoFrame;
     NDIlib_audio_frame_v3_t audioFrame;
+    int timeoutStreak = 0;
 
     while (m_running)
     {
@@ -158,11 +172,18 @@ void SourceRecorder::videoThreadFunc()
             // Update preview
             QImage img((uchar *)videoFrame.p_data, videoFrame.xres, videoFrame.yres, QImage::Format_RGBA8888);
             {
-              QMutexLocker locker(&m_mutex);
-              m_preview = img.copy();
-              m_status = "Recording";
+                QMutexLocker locker(&m_mutex);
+                m_preview = img.copy();
+                m_status = "Recording";
             }
             emit previewUpdated();
+
+            if (!m_recordingStarted)
+            {
+                m_timer.restart();
+                m_recordingStarted = true;
+            }
+            timeoutStreak = 0;
 
             // Prepare FFmpeg writer if needed
               if (m_writer.currentFile().isEmpty())
@@ -208,6 +229,11 @@ void SourceRecorder::videoThreadFunc()
             break;
         case NDIlib_frame_type_none:
             Logger::instance().log("NDI timeout for " + m_settings.label);
+            if (!m_recordingStarted && ++timeoutStreak >= 10)
+            {
+                m_status = "No signal";
+                emit errorOccurred("No video received from " + m_settings.label);
+            }
             break;
         default:
             break;
