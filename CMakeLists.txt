@@ -42,7 +42,11 @@ file(GLOB SRC_FILES
     src/*.cpp
 )
 
-add_executable(${PROJECT_NAME} ${SRC_FILES} ui/MainWindow.ui ui/SourceSettingsDialog.ui ui/SourceTile.ui)
+file(GLOB HEADER_FILES
+    include/*.h
+)
+
+add_executable(${PROJECT_NAME} ${SRC_FILES} ${HEADER_FILES} ui/MainWindow.ui ui/SourceSettingsDialog.ui ui/SourceTile.ui)
 
 target_link_libraries(${PROJECT_NAME}
     Qt6::Widgets
