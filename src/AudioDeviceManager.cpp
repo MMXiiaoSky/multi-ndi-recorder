@@ -1,6 +1,7 @@
 #include "AudioDeviceManager.h"
 #include "Logging.h"
 #include <atlbase.h>
+#include <Functiondiscoverykeys_devpkey.h>
 
 AudioDeviceManager::AudioDeviceManager(QObject *parent)
     : QObject(parent)

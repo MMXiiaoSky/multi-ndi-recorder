@@ -2,6 +2,7 @@
 #include "Logging.h"
 #include <QDir>
 #include <QDebug>
+#include <libavutil/channel_layout.h>
 
 FfmpegWriter::FfmpegWriter()
     : m_fmtCtx(nullptr), m_videoStream(nullptr), m_audioStream(nullptr), m_videoCodecCtx(nullptr),
@@ -79,7 +80,7 @@ bool FfmpegWriter::openContext(const QString &path)
     m_audioCodecCtx = avcodec_alloc_context3(audioCodec);
     m_audioCodecCtx->codec_id = AV_CODEC_ID_AAC;
     m_audioCodecCtx->sample_rate = m_cfg.audioSampleRate;
-    m_audioCodecCtx->channel_layout = av_get_default_channel_layout(m_cfg.audioChannels);
+    av_channel_layout_default(&m_audioCodecCtx->ch_layout, m_cfg.audioChannels);
     m_audioCodecCtx->channels = m_cfg.audioChannels;
     m_audioCodecCtx->sample_fmt = audioCodec->sample_fmts ? audioCodec->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
     m_audioCodecCtx->time_base = {1, m_cfg.audioSampleRate};
