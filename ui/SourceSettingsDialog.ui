@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SourceSettingsDialog</class>
+ <widget class="QDialog" name="SourceSettingsDialog">
+  <layout class="QFormLayout" name="formLayout">
+   <item row="0" column="0"><widget class="QLabel" name="label"><property name="text"><string>NDI Source</string></property></widget></item>
+   <item row="0" column="1"><layout class="QHBoxLayout"><item><widget class="QComboBox" name="ndiCombo"/></item><item><widget class="QPushButton" name="refreshNdiButton"><property name="text"><string>Refresh</string></property></widget></item></layout></item>
+   <item row="1" column="0"><widget class="QLabel" name="label_2"><property name="text"><string>Audio Device</string></property></widget></item>
+   <item row="1" column="1"><layout class="QHBoxLayout"><item><widget class="QComboBox" name="audioCombo"/></item><item><widget class="QPushButton" name="refreshAudioButton"><property name="text"><string>Refresh</string></property></widget></item></layout></item>
+   <item row="2" column="0"><widget class="QLabel" name="label_3"><property name="text"><string>Label</string></property></widget></item>
+   <item row="2" column="1"><widget class="QLineEdit" name="labelEdit"/></item>
+   <item row="3" column="0"><widget class="QLabel" name="label_4"><property name="text"><string>Output Folder</string></property></widget></item>
+   <item row="3" column="1"><layout class="QHBoxLayout"><item><widget class="QLineEdit" name="folderEdit"/></item><item><widget class="QPushButton" name="chooseFolderButton"><property name="text"><string>Choose</string></property></widget></item></layout></item>
+   <item row="4" column="0"><widget class="QLabel" name="label_5"><property name="text"><string>Mode</string></property></widget></item>
+   <item row="4" column="1"><layout class="QHBoxLayout"><item><widget class="QRadioButton" name="modeContinuous"><property name="text"><string>Continuous</string></property><property name="checked"><bool>true</bool></property></widget></item><item><widget class="QRadioButton" name="modeSegmented"><property name="text"><string>Segmented</string></property></widget></item><item><widget class="QSpinBox" name="segmentSpin"><property name="suffix"><string> min</string></property><property name="minimum"><number>1</number></property><property name="value"><number>20</number></property></widget></item></layout></item>
+   <item row="5" column="0" colspan="2"><widget class="QDialogButtonBox" name="buttonBox"><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property></widget></item>
+  </layout>
+ </widget>
+ <connections/>
+</ui>
