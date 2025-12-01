@@ -5,6 +5,7 @@
 #include <QThread>
 #include <QMutexLocker>
 #include <libavutil/imgutils.h>
+#include <libavutil/channel_layout.h>
 
 SourceRecorder::SourceRecorder(QObject *parent)
     : QObject(parent), m_running(false), m_paused(false), m_recv(nullptr)
@@ -31,9 +32,6 @@ void SourceRecorder::start()
     m_running = true;
     m_paused = false;
     m_timer.start();
-
-    m_videoThread = QThread();
-    m_audioThread = QThread();
 
     connect(&m_videoThread, &QThread::started, this, &SourceRecorder::videoThreadFunc);
     connect(&m_audioThread, &QThread::started, this, &SourceRecorder::audioThreadFunc);
@@ -215,7 +213,8 @@ void SourceRecorder::audioThreadFunc()
         {
             AVFrame *frame = av_frame_alloc();
             frame->nb_samples = numFrames;
-            frame->channel_layout = av_get_default_channel_layout(m_writer.currentFile().isEmpty() ? 2 : m_writer.currentFile().isEmpty() ? 2 : 2);
+            av_channel_layout_default(&frame->ch_layout, 2);
+            frame->channels = frame->ch_layout.nb_channels;
             frame->format = AV_SAMPLE_FMT_FLTP;
             frame->sample_rate = mixFormat->nSamplesPerSec;
             av_frame_get_buffer(frame, 0);
