@@ -333,12 +333,23 @@ void SourceRecorder::audioThreadFunc()
         DWORD flags = 0;
         if (SUCCEEDED(captureClient->GetBuffer(&data, &numFrames, &flags, nullptr, nullptr)))
         {
+            if (numFrames == 0)
+            {
+                captureClient->ReleaseBuffer(0);
+                continue;
+            }
+
             AVFrame *frame = av_frame_alloc();
             frame->nb_samples = numFrames;
             av_channel_layout_default(&frame->ch_layout, 2);
             frame->format = AV_SAMPLE_FMT_FLTP;
             frame->sample_rate = mixFormat->nSamplesPerSec;
-            av_frame_get_buffer(frame, 0);
+            if (av_frame_get_buffer(frame, 0) < 0)
+            {
+                av_frame_free(&frame);
+                captureClient->ReleaseBuffer(numFrames);
+                continue;
+            }
 
             // Interleave planar float conversion
             const float *input = reinterpret_cast<const float *>(data);
