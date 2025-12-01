@@ -4,6 +4,7 @@
 #include <QBuffer>
 #include <QThread>
 #include <QMutexLocker>
+#include <objbase.h>
 extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/channel_layout.h>
@@ -181,20 +182,67 @@ void SourceRecorder::videoThreadFunc()
 
 void SourceRecorder::audioThreadFunc()
 {
+    HRESULT coinit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    bool comInitialized = coinit == S_OK || coinit == S_FALSE;
+    if (FAILED(coinit) && coinit != RPC_E_CHANGED_MODE)
+    {
+        emit errorOccurred("Failed to initialize COM for audio capture: 0x" + QString::number(coinit, 16));
+        return;
+    }
+
     // Capture from WASAPI input device
     IMMDevice *device = m_audioManager.deviceByName(m_settings.audioDevice);
     if (!device)
     {
         emit errorOccurred("Audio device not found");
+        if (comInitialized)
+            CoUninitialize();
         return;
     }
     CComPtr<IAudioClient> audioClient;
-    device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void **)&audioClient);
+    HRESULT hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void **)&audioClient);
+    if (FAILED(hr) || !audioClient)
+    {
+        emit errorOccurred("Failed to activate audio client: 0x" + QString::number(hr, 16));
+        device->Release();
+        if (comInitialized)
+            CoUninitialize();
+        return;
+    }
+
     WAVEFORMATEX *mixFormat = nullptr;
-    audioClient->GetMixFormat(&mixFormat);
-    audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 0, 0, mixFormat, nullptr);
+    hr = audioClient->GetMixFormat(&mixFormat);
+    if (FAILED(hr))
+    {
+        emit errorOccurred("Failed to get audio mix format: 0x" + QString::number(hr, 16));
+        device->Release();
+        if (comInitialized)
+            CoUninitialize();
+        return;
+    }
+
+    hr = audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 0, 0, mixFormat, nullptr);
+    if (FAILED(hr))
+    {
+        emit errorOccurred("Failed to initialize audio client: 0x" + QString::number(hr, 16));
+        CoTaskMemFree(mixFormat);
+        device->Release();
+        if (comInitialized)
+            CoUninitialize();
+        return;
+    }
     CComPtr<IAudioCaptureClient> captureClient;
-    audioClient->GetService(__uuidof(IAudioCaptureClient), (void **)&captureClient);
+    hr = audioClient->GetService(__uuidof(IAudioCaptureClient), (void **)&captureClient);
+    if (FAILED(hr) || !captureClient)
+    {
+        emit errorOccurred("Failed to get audio capture client: 0x" + QString::number(hr, 16));
+        audioClient->Stop();
+        CoTaskMemFree(mixFormat);
+        device->Release();
+        if (comInitialized)
+            CoUninitialize();
+        return;
+    }
     audioClient->Start();
 
     int frameSize = mixFormat->nBlockAlign;
@@ -245,4 +293,6 @@ void SourceRecorder::audioThreadFunc()
     audioClient->Stop();
     CoTaskMemFree(mixFormat);
     device->Release();
+    if (comInitialized)
+        CoUninitialize();
 }
