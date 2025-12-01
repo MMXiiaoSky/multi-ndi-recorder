@@ -38,7 +38,7 @@ bool FfmpegWriter::openContext(const QString &path)
         return false;
     }
 
-    const AVCodec *videoCodec = avcodec_find_encoder(AV_CODEC_ID_HEVC);
+    const AVCodec *videoCodec = avcodec_find_encoder(AV_CODEC_ID_H264);
     const AVCodec *audioCodec = avcodec_find_encoder(AV_CODEC_ID_AAC);
     if (!videoCodec || !audioCodec)
     {
@@ -55,10 +55,27 @@ bool FfmpegWriter::openContext(const QString &path)
     }
 
     m_videoCodecCtx = avcodec_alloc_context3(videoCodec);
-    m_videoCodecCtx->codec_id = AV_CODEC_ID_HEVC;
+    m_videoCodecCtx->codec_id = AV_CODEC_ID_H264;
     m_videoCodecCtx->width = m_cfg.width;
     m_videoCodecCtx->height = m_cfg.height;
     m_videoCodecCtx->pix_fmt = m_cfg.outputPixFmt;
+    if (videoCodec->pix_fmts)
+    {
+        bool supported = false;
+        for (const AVPixelFormat *p = videoCodec->pix_fmts; *p != AV_PIX_FMT_NONE; ++p)
+        {
+            if (*p == m_videoCodecCtx->pix_fmt)
+            {
+                supported = true;
+                break;
+            }
+        }
+        if (!supported)
+        {
+            Logger::instance().log("Requested pixel format not supported by H.264 encoder; falling back to YUV420P");
+            m_videoCodecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
+        }
+    }
     m_videoCodecCtx->time_base = {1, m_cfg.fps};
     m_videoCodecCtx->framerate = {m_cfg.fps, 1};
     m_videoCodecCtx->gop_size = m_cfg.fps;
@@ -69,8 +86,8 @@ bool FfmpegWriter::openContext(const QString &path)
         m_videoCodecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
     AVDictionary *videoOpts = nullptr;
-    av_dict_set(&videoOpts, "preset", "slow", 0);
-    av_dict_set(&videoOpts, "crf", "0", 0);
+    av_dict_set(&videoOpts, "preset", "veryfast", 0);
+    av_dict_set(&videoOpts, "crf", "23", 0);
 
     if (avcodec_open2(m_videoCodecCtx, videoCodec, &videoOpts) < 0)
     {
