@@ -6,7 +6,8 @@
 
 FfmpegWriter::FfmpegWriter()
     : m_fmtCtx(nullptr), m_videoStream(nullptr), m_audioStream(nullptr), m_videoCodecCtx(nullptr),
-      m_audioCodecCtx(nullptr), m_sws(nullptr), m_swr(nullptr), m_startMs(0), m_segmentIndex(1)
+      m_audioCodecCtx(nullptr), m_sws(nullptr), m_swr(nullptr), m_startMs(0), m_segmentIndex(1), m_inputWidth(0),
+      m_inputHeight(0), m_inputFormat(AV_PIX_FMT_NONE)
 {
     avformat_network_init();
 }
@@ -23,21 +24,21 @@ QString FfmpegWriter::nextFileName()
     QString ts = now.toString("yyyyMMdd_HHmmss");
     if (m_cfg.segmented)
     {
-        return QString("%1/%2_%3_part%4.mkv").arg(m_cfg.outputFolder, m_cfg.sourceLabel, ts, QString::number(m_segmentIndex).rightJustified(2, '0'));
+        return QString("%1/%2_%3_part%4.mp4").arg(m_cfg.outputFolder, m_cfg.sourceLabel, ts, QString::number(m_segmentIndex).rightJustified(2, '0'));
     }
-    return QString("%1/%2_%3.mkv").arg(m_cfg.outputFolder, m_cfg.sourceLabel, ts);
+    return QString("%1/%2_%3.mp4").arg(m_cfg.outputFolder, m_cfg.sourceLabel, ts);
 }
 
 bool FfmpegWriter::openContext(const QString &path)
 {
-    avformat_alloc_output_context2(&m_fmtCtx, nullptr, "matroska", path.toUtf8().constData());
+    avformat_alloc_output_context2(&m_fmtCtx, nullptr, "mp4", path.toUtf8().constData());
     if (!m_fmtCtx)
     {
         Logger::instance().log("Failed to alloc output context");
         return false;
     }
 
-    const AVCodec *videoCodec = avcodec_find_encoder(AV_CODEC_ID_H264);
+    const AVCodec *videoCodec = avcodec_find_encoder(AV_CODEC_ID_HEVC);
     const AVCodec *audioCodec = avcodec_find_encoder(AV_CODEC_ID_AAC);
     if (!videoCodec || !audioCodec)
     {
@@ -54,22 +55,30 @@ bool FfmpegWriter::openContext(const QString &path)
     }
 
     m_videoCodecCtx = avcodec_alloc_context3(videoCodec);
-    m_videoCodecCtx->codec_id = AV_CODEC_ID_H264;
+    m_videoCodecCtx->codec_id = AV_CODEC_ID_HEVC;
     m_videoCodecCtx->width = m_cfg.width;
     m_videoCodecCtx->height = m_cfg.height;
-    m_videoCodecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
+    m_videoCodecCtx->pix_fmt = m_cfg.outputPixFmt;
     m_videoCodecCtx->time_base = {1, m_cfg.fps};
     m_videoCodecCtx->framerate = {m_cfg.fps, 1};
     m_videoCodecCtx->gop_size = m_cfg.fps;
+    m_videoCodecCtx->max_b_frames = 0;
+    m_videoCodecCtx->bit_rate = 0;
 
     if (m_fmtCtx->oformat->flags & AVFMT_GLOBALHEADER)
         m_videoCodecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
-    if (avcodec_open2(m_videoCodecCtx, videoCodec, nullptr) < 0)
+    AVDictionary *videoOpts = nullptr;
+    av_dict_set(&videoOpts, "preset", "slow", 0);
+    av_dict_set(&videoOpts, "crf", "0", 0);
+
+    if (avcodec_open2(m_videoCodecCtx, videoCodec, &videoOpts) < 0)
     {
         Logger::instance().log("Failed to open video codec");
+        av_dict_free(&videoOpts);
         return false;
     }
+    av_dict_free(&videoOpts);
 
     if (avcodec_parameters_from_context(m_videoStream->codecpar, m_videoCodecCtx) < 0)
     {
@@ -139,6 +148,24 @@ void FfmpegWriter::closeContext()
 {
     if (m_fmtCtx)
     {
+        auto flushEncoder = [&](AVCodecContext *ctx, AVStream *stream) {
+            if (!ctx || !stream)
+                return;
+            if (avcodec_send_frame(ctx, nullptr) < 0)
+                return;
+            AVPacket pkt;
+            av_init_packet(&pkt);
+            while (avcodec_receive_packet(ctx, &pkt) == 0)
+            {
+                pkt.stream_index = stream->index;
+                av_packet_rescale_ts(&pkt, ctx->time_base, stream->time_base);
+                av_interleaved_write_frame(m_fmtCtx, &pkt);
+                av_packet_unref(&pkt);
+            }
+        };
+
+        flushEncoder(m_videoCodecCtx, m_videoStream);
+        flushEncoder(m_audioCodecCtx, m_audioStream);
         av_write_trailer(m_fmtCtx);
         if (!(m_fmtCtx->oformat->flags & AVFMT_NOFILE))
         {
@@ -177,13 +204,43 @@ bool FfmpegWriter::writeVideoFrame(AVFrame *frame)
     QMutexLocker locker(&m_mutex);
     if (!m_fmtCtx)
         return false;
-    frame->format = m_videoCodecCtx->pix_fmt;
     frame->width = m_videoCodecCtx->width;
     frame->height = m_videoCodecCtx->height;
-    frame->pts = av_rescale_q(frame->pts, m_videoCodecCtx->time_base, m_videoStream->time_base);
 
-    if (avcodec_send_frame(m_videoCodecCtx, frame) < 0)
+    if (!m_sws || m_inputWidth != frame->width || m_inputHeight != frame->height || m_inputFormat != frame->format)
+    {
+        m_sws = sws_getCachedContext(m_sws, frame->width, frame->height, (AVPixelFormat)frame->format,
+                                     m_videoCodecCtx->width, m_videoCodecCtx->height, m_videoCodecCtx->pix_fmt,
+                                     SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (!m_sws)
+            return false;
+        m_inputWidth = frame->width;
+        m_inputHeight = frame->height;
+        m_inputFormat = (AVPixelFormat)frame->format;
+    }
+
+    AVFrame *converted = av_frame_alloc();
+    converted->format = m_videoCodecCtx->pix_fmt;
+    converted->width = m_videoCodecCtx->width;
+    converted->height = m_videoCodecCtx->height;
+    if (av_frame_get_buffer(converted, 0) < 0)
+    {
+        av_frame_free(&converted);
         return false;
+    }
+    if (sws_scale(m_sws, frame->data, frame->linesize, 0, frame->height, converted->data, converted->linesize) <= 0)
+    {
+        av_frame_free(&converted);
+        return false;
+    }
+
+    converted->pts = av_rescale_q(frame->pts, m_videoCodecCtx->time_base, m_videoStream->time_base);
+
+    if (avcodec_send_frame(m_videoCodecCtx, converted) < 0)
+    {
+        av_frame_free(&converted);
+        return false;
+    }
     AVPacket pkt;
     av_init_packet(&pkt);
     pkt.data = nullptr;
@@ -195,10 +252,12 @@ bool FfmpegWriter::writeVideoFrame(AVFrame *frame)
         if (av_interleaved_write_frame(m_fmtCtx, &pkt) < 0)
         {
             av_packet_unref(&pkt);
+            av_frame_free(&converted);
             return false;
         }
         av_packet_unref(&pkt);
     }
+    av_frame_free(&converted);
     return true;
 }
 

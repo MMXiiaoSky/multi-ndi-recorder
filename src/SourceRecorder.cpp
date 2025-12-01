@@ -205,6 +205,8 @@ void SourceRecorder::videoThreadFunc()
                   cfg.width = videoFrame.xres;
                   cfg.height = videoFrame.yres;
                   cfg.fps = videoFrame.frame_rate_N ? videoFrame.frame_rate_N / videoFrame.frame_rate_D : 30;
+                  cfg.inputPixFmt = AV_PIX_FMT_RGBA;
+                  cfg.outputPixFmt = AV_PIX_FMT_YUV444P;
                   if (!m_writer.start(cfg))
                   {
                       m_status = "Error";
