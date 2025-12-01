@@ -54,6 +54,7 @@ void SourceRecorder::start()
     m_running = true;
     m_paused = false;
     m_recordingStarted = false;
+    m_videoPts = 0;
     m_pausedDurationMs = 0;
     m_pauseStartMs = 0;
     m_status = "Connecting";
@@ -216,6 +217,7 @@ void SourceRecorder::videoThreadFunc()
                       NDIlib_recv_free_video_v2(m_recv, &videoFrame);
                       break;
                   }
+                  m_videoPts = 0;
                   emit recordingStarted(m_writer.currentFile());
               }
 
@@ -224,7 +226,7 @@ void SourceRecorder::videoThreadFunc()
             frame->width = videoFrame.xres;
             frame->height = videoFrame.yres;
             av_image_fill_arrays(frame->data, frame->linesize, videoFrame.p_data, AV_PIX_FMT_RGBA, videoFrame.xres, videoFrame.yres, 1);
-            frame->pts = videoFrame.timestamp;
+            frame->pts = m_videoPts++;
             m_writer.writeVideoFrame(frame);
             av_frame_free(&frame);
 
@@ -232,6 +234,7 @@ void SourceRecorder::videoThreadFunc()
             if (m_writer.needsRollover())
             {
                 m_writer.rollover();
+                m_videoPts = 0;
             }
             break;
         }

@@ -57,6 +57,7 @@ private:
     QAtomicInteger<bool> m_running;
     QAtomicInteger<bool> m_paused;
     QAtomicInteger<bool> m_recordingStarted;
+    qint64 m_videoPts = 0;
     QImage m_preview;
     QString m_status;
     QElapsedTimer m_timer;
