@@ -211,7 +211,7 @@ void SourceRecorder::videoThreadFunc()
                   const double fpsValue = hasFrameRate
                                               ? static_cast<double>(videoFrame.frame_rate_N) / videoFrame.frame_rate_D
                                               : 0.0;
-                  const int fpsInt = fpsValue > 0.0 ? std::max(1, static_cast<int>(fpsValue + 0.5)) : 60;
+                  const int fpsInt = fpsValue > 0.0 ? (std::max)(1, static_cast<int>(fpsValue + 0.5)) : 60;
                   cfg.fps = fpsInt;
                   cfg.inputPixFmt = AV_PIX_FMT_RGBA;
                   cfg.outputPixFmt = AV_PIX_FMT_YUV420P;
