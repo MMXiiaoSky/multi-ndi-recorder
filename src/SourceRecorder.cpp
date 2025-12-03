@@ -55,10 +55,13 @@ void SourceRecorder::start()
     m_paused = false;
     m_recordingStarted = false;
     m_videoPts = 0;
+    m_lastWriterPts = -1;
     m_firstTimestamp = NDIlib_recv_timestamp_undefined;
     m_prevTimestamp = NDIlib_recv_timestamp_undefined;
     m_timestampScale = 10000000;
     m_expectedFrameTicks10ns = 0;
+    m_expectedPtsStep = 1;
+    m_timestampOutlierLogged = false;
     {
         QMutexLocker stateLocker(&m_stateMutex);
         m_pausedDurationMs = 0;
@@ -278,6 +281,9 @@ void SourceRecorder::videoThreadFunc()
                     break;
                 }
                 m_videoPts = 0;
+                m_lastWriterPts = -1;
+                m_expectedPtsStep = std::max<int64_t>(1, av_rescale_q(m_expectedFrameTicks10ns, AVRational{1, 10000000}, m_writer.videoTimeBase()));
+                m_timestampOutlierLogged = false;
                 emit recordingStarted(m_writer.currentFile());
             }
 
@@ -311,9 +317,28 @@ void SourceRecorder::videoThreadFunc()
                     pausedDurationTicks = m_pausedDurationMs * (m_timestampScale / 1000);
                 }
                 const int64_t delta = videoFrame.timestamp - m_firstTimestamp - pausedDurationTicks;
-                ptsValue = av_rescale_q(std::max<int64_t>(0, delta), AVRational{1, static_cast<int>(m_timestampScale)}, timeBase);
+                const qint64 scaledPts = av_rescale_q(std::max<int64_t>(0, delta), AVRational{1, static_cast<int>(m_timestampScale)}, timeBase);
+                bool useTimestampPts = scaledPts >= 0;
+                if (m_lastWriterPts >= 0)
+                {
+                    const qint64 maxForwardJump = m_expectedPtsStep * 5;
+                    if (scaledPts < m_lastWriterPts - m_expectedPtsStep || scaledPts > m_lastWriterPts + maxForwardJump)
+                        useTimestampPts = false;
+                }
+                if (useTimestampPts)
+                {
+                    ptsValue = scaledPts;
+                    m_videoPts = ptsValue + m_expectedPtsStep;
+                }
+                else if (!m_timestampOutlierLogged)
+                {
+                    Logger::instance().log(QString("Ignoring outlier NDI timestamp for %1; using sequential frame pacing instead")
+                                               .arg(m_settings.label));
+                    m_timestampOutlierLogged = true;
+                }
             }
             frame->pts = ptsValue;
+            m_lastWriterPts = ptsValue;
             m_writer.writeVideoFrame(frame);
             av_frame_free(&frame);
 
@@ -322,8 +347,11 @@ void SourceRecorder::videoThreadFunc()
             {
                 m_writer.rollover();
                 m_videoPts = 0;
+                m_lastWriterPts = -1;
                 m_firstTimestamp = NDIlib_recv_timestamp_undefined;
                 m_prevTimestamp = NDIlib_recv_timestamp_undefined;
+                m_expectedPtsStep = std::max<int64_t>(1, av_rescale_q(m_expectedFrameTicks10ns, AVRational{1, 10000000}, m_writer.videoTimeBase()));
+                m_timestampOutlierLogged = false;
             }
             break;
         }
