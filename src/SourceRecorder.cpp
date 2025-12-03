@@ -56,6 +56,9 @@ void SourceRecorder::start()
     m_recordingStarted = false;
     m_videoPts = 0;
     m_firstTimestamp = NDIlib_recv_timestamp_undefined;
+    m_prevTimestamp = NDIlib_recv_timestamp_undefined;
+    m_timestampScale = 10000000;
+    m_expectedFrameTicks10ns = 0;
     {
         QMutexLocker stateLocker(&m_stateMutex);
         m_pausedDurationMs = 0;
@@ -263,6 +266,7 @@ void SourceRecorder::videoThreadFunc()
                 cfg.fps = fpsInfo.fps;
                 cfg.fpsNum = fpsInfo.num;
                 cfg.fpsDen = fpsInfo.den;
+                m_expectedFrameTicks10ns = (static_cast<qint64>(10000000) * fpsInfo.den) / fpsInfo.num;
                 cfg.inputPixFmt = AV_PIX_FMT_RGBA;
                 cfg.outputPixFmt = AV_PIX_FMT_YUV420P;
                 if (!m_writer.start(cfg))
@@ -286,15 +290,28 @@ void SourceRecorder::videoThreadFunc()
             qint64 ptsValue = m_videoPts++;
             if (videoFrame.timestamp != NDIlib_recv_timestamp_undefined && timeBase.num > 0 && timeBase.den > 0)
             {
+                if (m_prevTimestamp != NDIlib_recv_timestamp_undefined && m_expectedFrameTicks10ns > 0)
+                {
+                    const qint64 deltaTicks = videoFrame.timestamp - m_prevTimestamp;
+                    // Some NDI sources report timestamps in microseconds instead of 100ns ticks.
+                    // Detect this by comparing the observed delta with the expected frame spacing.
+                    if (m_timestampScale == 10000000 && deltaTicks > 0 && deltaTicks < m_expectedFrameTicks10ns / 2)
+                    {
+                        m_timestampScale = 1000000;
+                        Logger::instance().log(QString("NDI timestamps appear to be in microseconds for %1; adjusting scale")
+                                                   .arg(m_settings.label));
+                    }
+                }
+                m_prevTimestamp = videoFrame.timestamp;
                 if (m_firstTimestamp == NDIlib_recv_timestamp_undefined)
                     m_firstTimestamp = videoFrame.timestamp;
                 qint64 pausedDurationTicks = 0;
                 {
                     QMutexLocker stateLocker(&m_stateMutex);
-                    pausedDurationTicks = m_pausedDurationMs * 10000;
+                    pausedDurationTicks = m_pausedDurationMs * (m_timestampScale / 1000);
                 }
                 const int64_t delta = videoFrame.timestamp - m_firstTimestamp - pausedDurationTicks;
-                ptsValue = av_rescale_q(std::max<int64_t>(0, delta), AVRational{1, 10000000}, timeBase);
+                ptsValue = av_rescale_q(std::max<int64_t>(0, delta), AVRational{1, static_cast<int>(m_timestampScale)}, timeBase);
             }
             frame->pts = ptsValue;
             m_writer.writeVideoFrame(frame);
@@ -306,6 +323,7 @@ void SourceRecorder::videoThreadFunc()
                 m_writer.rollover();
                 m_videoPts = 0;
                 m_firstTimestamp = NDIlib_recv_timestamp_undefined;
+                m_prevTimestamp = NDIlib_recv_timestamp_undefined;
             }
             break;
         }
