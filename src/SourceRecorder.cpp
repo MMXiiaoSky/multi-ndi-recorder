@@ -1,16 +1,13 @@
 #include "SourceRecorder.h"
 #include "Logging.h"
 #include <QImage>
-#include <QBuffer>
 #include <QByteArray>
 #include <QThread>
 #include <QMutexLocker>
 #include <algorithm>
 #include <cmath>
-#include <objbase.h>
 extern "C" {
 #include <libavutil/imgutils.h>
-#include <libavutil/channel_layout.h>
 #include <libavutil/rational.h>
 }
 
@@ -38,10 +35,10 @@ void SourceRecorder::start()
     if (m_running)
         return;
 
-    if (m_settings.ndiSource.isEmpty() || m_settings.audioDevice.isEmpty() || m_settings.outputFolder.isEmpty())
+    if (m_settings.ndiSource.isEmpty() || m_settings.outputFolder.isEmpty())
     {
         m_status = "Missing settings";
-        emit errorOccurred("Configure NDI source, audio device, and output folder before starting.");
+        emit errorOccurred("Configure NDI source and output folder before starting.");
         return;
     }
 
@@ -73,11 +70,8 @@ void SourceRecorder::start()
     emit previewUpdated();
 
     connect(&m_videoThread, &QThread::started, this, &SourceRecorder::videoThreadFunc);
-    connect(&m_audioThread, &QThread::started, this, &SourceRecorder::audioThreadFunc, Qt::DirectConnection);
-
     moveToThread(&m_videoThread);
     m_videoThread.start();
-    m_audioThread.start();
 }
 
 void SourceRecorder::stop()
@@ -91,9 +85,7 @@ void SourceRecorder::stop()
         m_pauseStartMs = 0;
     }
     m_videoThread.quit();
-    m_audioThread.quit();
     m_videoThread.wait();
-    m_audioThread.wait();
     if (m_recv)
     {
         NDIlib_recv_destroy(m_recv);
@@ -288,7 +280,6 @@ void SourceRecorder::videoThreadFunc()
             break;
         }
         case NDIlib_frame_type_audio:
-            // Audio handled in audio thread
             NDIlib_recv_free_audio_v3(m_recv, &audioFrame);
             break;
         case NDIlib_frame_type_none:
@@ -305,146 +296,3 @@ void SourceRecorder::videoThreadFunc()
     }
 }
 
-void SourceRecorder::audioThreadFunc()
-{
-    HRESULT coinit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    bool comInitialized = coinit == S_OK || coinit == S_FALSE;
-    if (FAILED(coinit) && coinit != RPC_E_CHANGED_MODE)
-    {
-        emit errorOccurred("Failed to initialize COM for audio capture: 0x" + QString::number(coinit, 16));
-        return;
-    }
-
-    // Capture from WASAPI input device
-    IMMDevice *device = m_audioManager.deviceByName(m_settings.audioDevice);
-    if (!device)
-    {
-        emit errorOccurred("Audio device not found");
-        if (comInitialized)
-            CoUninitialize();
-        return;
-    }
-    CComPtr<IAudioClient> audioClient;
-    HRESULT hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void **)&audioClient);
-    if (FAILED(hr) || !audioClient)
-    {
-        emit errorOccurred("Failed to activate audio client: 0x" + QString::number(hr, 16));
-        device->Release();
-        if (comInitialized)
-            CoUninitialize();
-        return;
-    }
-
-    WAVEFORMATEX *mixFormat = nullptr;
-    hr = audioClient->GetMixFormat(&mixFormat);
-    if (FAILED(hr))
-    {
-        emit errorOccurred("Failed to get audio mix format: 0x" + QString::number(hr, 16));
-        device->Release();
-        if (comInitialized)
-            CoUninitialize();
-        return;
-    }
-
-    hr = audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 0, 0, mixFormat, nullptr);
-    if (FAILED(hr))
-    {
-        emit errorOccurred("Failed to initialize audio client: 0x" + QString::number(hr, 16));
-        CoTaskMemFree(mixFormat);
-        device->Release();
-        if (comInitialized)
-            CoUninitialize();
-        return;
-    }
-    CComPtr<IAudioCaptureClient> captureClient;
-    hr = audioClient->GetService(__uuidof(IAudioCaptureClient), (void **)&captureClient);
-    if (FAILED(hr) || !captureClient)
-    {
-        emit errorOccurred("Failed to get audio capture client: 0x" + QString::number(hr, 16));
-        audioClient->Stop();
-        CoTaskMemFree(mixFormat);
-        device->Release();
-        if (comInitialized)
-            CoUninitialize();
-        return;
-    }
-    audioClient->Start();
-
-    int frameSize = mixFormat->nBlockAlign;
-    UINT32 packetFrames = 0;
-    qint64 pts = 0;
-
-    QString lastWriterFile;
-    while (m_running)
-    {
-        if (m_paused)
-        {
-            QThread::msleep(10);
-            continue;
-        }
-        UINT32 numFrames = 0;
-        BYTE *data = nullptr;
-        DWORD flags = 0;
-        if (SUCCEEDED(captureClient->GetBuffer(&data, &numFrames, &flags, nullptr, nullptr)))
-        {
-            if (numFrames == 0)
-            {
-                captureClient->ReleaseBuffer(0);
-                continue;
-            }
-
-            const QString writerFile = m_writer.currentFile();
-            if (writerFile.isEmpty())
-            {
-                pts = 0;
-                lastWriterFile.clear();
-                captureClient->ReleaseBuffer(numFrames);
-                continue;
-            }
-
-            if (writerFile != lastWriterFile)
-            {
-                pts = 0;
-                lastWriterFile = writerFile;
-            }
-
-            AVFrame *frame = av_frame_alloc();
-            frame->nb_samples = numFrames;
-            av_channel_layout_default(&frame->ch_layout, 2);
-            frame->format = AV_SAMPLE_FMT_FLTP;
-            frame->sample_rate = mixFormat->nSamplesPerSec;
-            if (av_frame_get_buffer(frame, 0) < 0)
-            {
-                av_frame_free(&frame);
-                captureClient->ReleaseBuffer(numFrames);
-                continue;
-            }
-
-            // Interleave planar float conversion
-            const float *input = reinterpret_cast<const float *>(data);
-            const int channels = frame->ch_layout.nb_channels;
-            for (int ch = 0; ch < channels; ++ch)
-            {
-                for (uint32_t i = 0; i < numFrames; ++i)
-                {
-                    reinterpret_cast<float *>(frame->data[ch])[i] = input[i * 2 + ch];
-                }
-            }
-            frame->pts = pts;
-            pts += numFrames;
-            if (!m_writer.currentFile().isEmpty())
-                m_writer.writeAudioFrame(frame);
-            av_frame_free(&frame);
-            captureClient->ReleaseBuffer(numFrames);
-        }
-        else
-        {
-            QThread::msleep(5);
-        }
-    }
-    audioClient->Stop();
-    CoTaskMemFree(mixFormat);
-    device->Release();
-    if (comInitialized)
-        CoUninitialize();
-}

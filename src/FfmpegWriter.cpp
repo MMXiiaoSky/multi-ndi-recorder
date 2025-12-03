@@ -2,12 +2,10 @@
 #include "Logging.h"
 #include <QDir>
 #include <QDebug>
-#include <libavutil/channel_layout.h>
 
 FfmpegWriter::FfmpegWriter()
-    : m_fmtCtx(nullptr), m_videoStream(nullptr), m_audioStream(nullptr), m_videoCodecCtx(nullptr),
-      m_audioCodecCtx(nullptr), m_sws(nullptr), m_swr(nullptr), m_convertedFrame(nullptr), m_startMs(0), m_segmentIndex(1),
-      m_inputWidth(0), m_inputHeight(0), m_inputFormat(AV_PIX_FMT_NONE)
+    : m_fmtCtx(nullptr), m_videoStream(nullptr), m_videoCodecCtx(nullptr), m_sws(nullptr), m_convertedFrame(nullptr),
+      m_startMs(0), m_segmentIndex(1), m_inputWidth(0), m_inputHeight(0), m_inputFormat(AV_PIX_FMT_NONE)
 {
     avformat_network_init();
 }
@@ -39,16 +37,14 @@ bool FfmpegWriter::openContext(const QString &path)
     }
 
     const AVCodec *videoCodec = avcodec_find_encoder(AV_CODEC_ID_H264);
-    const AVCodec *audioCodec = avcodec_find_encoder(AV_CODEC_ID_AAC);
-    if (!videoCodec || !audioCodec)
+    if (!videoCodec)
     {
         Logger::instance().log("Missing codecs");
         return false;
     }
 
     m_videoStream = avformat_new_stream(m_fmtCtx, videoCodec);
-    m_audioStream = avformat_new_stream(m_fmtCtx, audioCodec);
-    if (!m_videoStream || !m_audioStream)
+    if (!m_videoStream)
     {
         Logger::instance().log("Failed to create streams");
         return false;
@@ -104,28 +100,6 @@ bool FfmpegWriter::openContext(const QString &path)
         return false;
     }
 
-    m_audioCodecCtx = avcodec_alloc_context3(audioCodec);
-    m_audioCodecCtx->codec_id = AV_CODEC_ID_AAC;
-    m_audioCodecCtx->sample_rate = m_cfg.audioSampleRate;
-    av_channel_layout_default(&m_audioCodecCtx->ch_layout, m_cfg.audioChannels);
-    m_audioCodecCtx->sample_fmt = audioCodec->sample_fmts ? audioCodec->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
-    m_audioCodecCtx->time_base = {1, m_cfg.audioSampleRate};
-    m_audioCodecCtx->bit_rate = 128000;
-    if (m_fmtCtx->oformat->flags & AVFMT_GLOBALHEADER)
-        m_audioCodecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-
-    if (avcodec_open2(m_audioCodecCtx, audioCodec, nullptr) < 0)
-    {
-        Logger::instance().log("Failed to open audio codec");
-        return false;
-    }
-    if (avcodec_parameters_from_context(m_audioStream->codecpar, m_audioCodecCtx) < 0)
-    {
-        Logger::instance().log("Failed to copy audio params");
-        return false;
-    }
-
-    m_audioStream->time_base = m_audioCodecCtx->time_base;
     m_videoStream->time_base = m_videoCodecCtx->time_base;
     m_videoStream->avg_frame_rate = {m_cfg.fpsNum, m_cfg.fpsDen};
     m_videoStream->r_frame_rate = {m_cfg.fpsNum, m_cfg.fpsDen};
@@ -193,7 +167,6 @@ void FfmpegWriter::closeContext()
         };
 
         flushEncoder(m_videoCodecCtx, m_videoStream);
-        flushEncoder(m_audioCodecCtx, m_audioStream);
         av_write_trailer(m_fmtCtx);
         if (!(m_fmtCtx->oformat->flags & AVFMT_NOFILE))
         {
@@ -206,18 +179,10 @@ void FfmpegWriter::closeContext()
     {
         avcodec_free_context(&m_videoCodecCtx);
     }
-    if (m_audioCodecCtx)
-    {
-        avcodec_free_context(&m_audioCodecCtx);
-    }
     if (m_sws)
     {
         sws_freeContext(m_sws);
         m_sws = nullptr;
-    }
-    if (m_swr)
-    {
-        swr_free(&m_swr);
     }
     if (m_convertedFrame)
     {
@@ -307,30 +272,6 @@ bool FfmpegWriter::ensureConvertedFrame()
             av_frame_free(&m_convertedFrame);
             return false;
         }
-    }
-    return true;
-}
-
-bool FfmpegWriter::writeAudioFrame(AVFrame *frame)
-{
-    QMutexLocker locker(&m_mutex);
-    if (!m_fmtCtx)
-        return false;
-    frame->pts = av_rescale_q(frame->pts, m_audioCodecCtx->time_base, m_audioStream->time_base);
-    if (avcodec_send_frame(m_audioCodecCtx, frame) < 0)
-        return false;
-    AVPacket pkt;
-    av_init_packet(&pkt);
-    while (avcodec_receive_packet(m_audioCodecCtx, &pkt) == 0)
-    {
-        pkt.stream_index = m_audioStream->index;
-        av_packet_rescale_ts(&pkt, m_audioCodecCtx->time_base, m_audioStream->time_base);
-        if (av_interleaved_write_frame(m_fmtCtx, &pkt) < 0)
-        {
-            av_packet_unref(&pkt);
-            return false;
-        }
-        av_packet_unref(&pkt);
     }
     return true;
 }
