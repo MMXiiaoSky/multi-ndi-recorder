@@ -56,7 +56,10 @@ private:
     QAtomicInteger<bool> m_paused;
     QAtomicInteger<bool> m_recordingStarted;
     qint64 m_videoPts = 0;
-    qint64 m_firstTimestamp = NDIlib_recv_timestamp_undefined;
+    qint64 m_expectedFrameTicks10ns = 0;
+    qint64 m_expectedPtsStep = 1;
+    int m_sourceFpsNum = 60;
+    int m_sourceFpsDen = 1;
     QImage m_preview;
     QString m_status;
     QElapsedTimer m_timer;
