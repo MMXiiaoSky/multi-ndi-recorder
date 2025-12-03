@@ -4,6 +4,9 @@
 #include <QByteArray>
 #include <QThread>
 #include <QMutexLocker>
+#include <QProcess>
+#include <QFile>
+#include <QFileInfo>
 #include <algorithm>
 #include <cmath>
 extern "C" {
@@ -55,13 +58,10 @@ void SourceRecorder::start()
     m_paused = false;
     m_recordingStarted = false;
     m_videoPts = 0;
-    m_lastWriterPts = -1;
-    m_firstTimestamp = NDIlib_recv_timestamp_undefined;
-    m_prevTimestamp = NDIlib_recv_timestamp_undefined;
-    m_timestampScale = 10000000;
     m_expectedFrameTicks10ns = 0;
     m_expectedPtsStep = 1;
-    m_timestampOutlierLogged = false;
+    m_sourceFpsNum = 60;
+    m_sourceFpsDen = 1;
     {
         QMutexLocker stateLocker(&m_stateMutex);
         m_pausedDurationMs = 0;
@@ -82,6 +82,8 @@ void SourceRecorder::start()
 
 void SourceRecorder::stop()
 {
+    const QString recordedFile = m_writer.currentFile();
+
     m_running = false;
     m_paused = false;
     m_recordingStarted = false;
@@ -98,6 +100,39 @@ void SourceRecorder::stop()
         m_recv = nullptr;
     }
     m_writer.stop();
+
+    if (!recordedFile.isEmpty())
+    {
+        QFileInfo info(recordedFile);
+        if (info.exists() && info.size() > 0)
+        {
+            QString fpsArg = QString::number(m_sourceFpsNum);
+            if (m_sourceFpsDen != 1)
+                fpsArg = QString("%1/%2").arg(m_sourceFpsNum).arg(m_sourceFpsDen);
+
+            const QString tmpPath = info.path() + "/." + info.completeBaseName() + "_fpsfix.mp4";
+            QStringList args = {"-y", "-i", recordedFile, "-r", fpsArg, "-vsync", "cfr", "-c:v", "libx264", "-preset",
+                                 "ultrafast", "-b:v", "12M", "-movflags", "+faststart", tmpPath};
+            QProcess ffmpeg;
+            ffmpeg.start("ffmpeg", args);
+            ffmpeg.waitForFinished(-1);
+            if (ffmpeg.exitStatus() == QProcess::NormalExit && ffmpeg.exitCode() == 0)
+            {
+                QFile::remove(recordedFile);
+                if (!QFile::rename(tmpPath, recordedFile))
+                {
+                    QFile::remove(tmpPath);
+                    Logger::instance().log("Failed to replace recording with fps-fixed version for " + m_settings.label);
+                }
+            }
+            else
+            {
+                QFile::remove(tmpPath);
+                Logger::instance().log("FFmpeg framerate fix failed for " + m_settings.label + ": " + ffmpeg.readAllStandardError());
+            }
+        }
+    }
+
     emit recordingStopped();
     m_status = "Idle";
     {
@@ -269,6 +304,8 @@ void SourceRecorder::videoThreadFunc()
                 cfg.fps = fpsInfo.fps;
                 cfg.fpsNum = fpsInfo.num;
                 cfg.fpsDen = fpsInfo.den;
+                m_sourceFpsNum = fpsInfo.num;
+                m_sourceFpsDen = fpsInfo.den;
                 m_expectedFrameTicks10ns = (static_cast<qint64>(10000000) * fpsInfo.den) / fpsInfo.num;
                 cfg.inputPixFmt = AV_PIX_FMT_RGBA;
                 cfg.outputPixFmt = AV_PIX_FMT_YUV420P;
@@ -281,9 +318,7 @@ void SourceRecorder::videoThreadFunc()
                     break;
                 }
                 m_videoPts = 0;
-                m_lastWriterPts = -1;
                 m_expectedPtsStep = std::max<int64_t>(1, av_rescale_q(m_expectedFrameTicks10ns, AVRational{1, 10000000}, m_writer.videoTimeBase()));
-                m_timestampOutlierLogged = false;
                 emit recordingStarted(m_writer.currentFile());
             }
 
@@ -292,53 +327,8 @@ void SourceRecorder::videoThreadFunc()
             frame->width = videoFrame.xres;
             frame->height = videoFrame.yres;
             av_image_fill_arrays(frame->data, frame->linesize, videoFrame.p_data, AV_PIX_FMT_RGBA, videoFrame.xres, videoFrame.yres, 1);
-            AVRational timeBase = m_writer.videoTimeBase();
-            qint64 ptsValue = m_videoPts++;
-            if (videoFrame.timestamp != NDIlib_recv_timestamp_undefined && timeBase.num > 0 && timeBase.den > 0)
-            {
-                if (m_prevTimestamp != NDIlib_recv_timestamp_undefined && m_expectedFrameTicks10ns > 0)
-                {
-                    const qint64 deltaTicks = videoFrame.timestamp - m_prevTimestamp;
-                    // Some NDI sources report timestamps in microseconds instead of 100ns ticks.
-                    // Detect this by comparing the observed delta with the expected frame spacing.
-                    if (m_timestampScale == 10000000 && deltaTicks > 0 && deltaTicks < m_expectedFrameTicks10ns / 2)
-                    {
-                        m_timestampScale = 1000000;
-                        Logger::instance().log(QString("NDI timestamps appear to be in microseconds for %1; adjusting scale")
-                                                   .arg(m_settings.label));
-                    }
-                }
-                m_prevTimestamp = videoFrame.timestamp;
-                if (m_firstTimestamp == NDIlib_recv_timestamp_undefined)
-                    m_firstTimestamp = videoFrame.timestamp;
-                qint64 pausedDurationTicks = 0;
-                {
-                    QMutexLocker stateLocker(&m_stateMutex);
-                    pausedDurationTicks = m_pausedDurationMs * (m_timestampScale / 1000);
-                }
-                const int64_t delta = videoFrame.timestamp - m_firstTimestamp - pausedDurationTicks;
-                const qint64 scaledPts = av_rescale_q(std::max<int64_t>(0, delta), AVRational{1, static_cast<int>(m_timestampScale)}, timeBase);
-                bool useTimestampPts = scaledPts >= 0;
-                if (m_lastWriterPts >= 0)
-                {
-                    const qint64 maxForwardJump = m_expectedPtsStep * 5;
-                    if (scaledPts < m_lastWriterPts - m_expectedPtsStep || scaledPts > m_lastWriterPts + maxForwardJump)
-                        useTimestampPts = false;
-                }
-                if (useTimestampPts)
-                {
-                    ptsValue = scaledPts;
-                    m_videoPts = ptsValue + m_expectedPtsStep;
-                }
-                else if (!m_timestampOutlierLogged)
-                {
-                    Logger::instance().log(QString("Ignoring outlier NDI timestamp for %1; using sequential frame pacing instead")
-                                               .arg(m_settings.label));
-                    m_timestampOutlierLogged = true;
-                }
-            }
-            frame->pts = ptsValue;
-            m_lastWriterPts = ptsValue;
+            frame->pts = m_videoPts;
+            m_videoPts += m_expectedPtsStep;
             m_writer.writeVideoFrame(frame);
             av_frame_free(&frame);
 
@@ -347,11 +337,7 @@ void SourceRecorder::videoThreadFunc()
             {
                 m_writer.rollover();
                 m_videoPts = 0;
-                m_lastWriterPts = -1;
-                m_firstTimestamp = NDIlib_recv_timestamp_undefined;
-                m_prevTimestamp = NDIlib_recv_timestamp_undefined;
                 m_expectedPtsStep = std::max<int64_t>(1, av_rescale_q(m_expectedFrameTicks10ns, AVRational{1, 10000000}, m_writer.videoTimeBase()));
-                m_timestampOutlierLogged = false;
             }
             break;
         }
