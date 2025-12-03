@@ -7,9 +7,7 @@ SourceSettingsDialog::SourceSettingsDialog(QWidget *parent)
 {
     ui->setupUi(this);
     refreshNdi();
-    refreshAudio();
     connect(ui->refreshNdiButton, &QPushButton::clicked, this, &SourceSettingsDialog::refreshNdi);
-    connect(ui->refreshAudioButton, &QPushButton::clicked, this, &SourceSettingsDialog::refreshAudio);
     connect(ui->chooseFolderButton, &QPushButton::clicked, [this]() {
         QString dir = QFileDialog::getExistingDirectory(this, tr("Output Folder"), ui->folderEdit->text());
         if (!dir.isEmpty())
@@ -28,10 +26,6 @@ void SourceSettingsDialog::setSettings(const SourceSettings &settings)
     ui->ndiCombo->setCurrentText(settings.ndiSource);
     if (ui->ndiCombo->currentText().isEmpty() && ui->ndiCombo->count() > 0)
         ui->ndiCombo->setCurrentIndex(0);
-
-    ui->audioCombo->setCurrentText(settings.audioDevice);
-    if (ui->audioCombo->currentText().isEmpty() && ui->audioCombo->count() > 0)
-        ui->audioCombo->setCurrentIndex(0);
     ui->labelEdit->setText(settings.label);
     ui->folderEdit->setText(settings.outputFolder);
     ui->segmentSpin->setValue(settings.segmentMinutes);
@@ -43,7 +37,6 @@ SourceSettings SourceSettingsDialog::settings() const
 {
     SourceSettings s;
     s.ndiSource = ui->ndiCombo->currentText();
-    s.audioDevice = ui->audioCombo->currentText();
     s.outputFolder = ui->folderEdit->text();
     s.label = ui->labelEdit->text();
     s.segmentMinutes = ui->segmentSpin->value();
@@ -55,12 +48,6 @@ void SourceSettingsDialog::refreshNdi()
 {
     ui->ndiCombo->clear();
     ui->ndiCombo->addItems(m_ndi.availableSources());
-}
-
-void SourceSettingsDialog::refreshAudio()
-{
-    ui->audioCombo->clear();
-    ui->audioCombo->addItems(m_audio.inputDevices());
 }
 
 void SourceSettingsDialog::on_buttonBox_accepted()

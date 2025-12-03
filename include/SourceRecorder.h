@@ -7,12 +7,10 @@
 #include <QMutex>
 #include "FfmpegWriter.h"
 #include "NdiManager.h"
-#include "AudioDeviceManager.h"
 
 struct SourceSettings
 {
     QString ndiSource;
-    QString audioDevice;
     QString outputFolder;
     QString label;
     bool segmented = false;
@@ -47,7 +45,6 @@ signals:
 
 private:
     void videoThreadFunc();
-    void audioThreadFunc();
     void reconnect();
 
     mutable QMutex m_mutex;
@@ -55,7 +52,6 @@ private:
     SourceSettings m_settings;
     FfmpegWriter m_writer;
     QThread m_videoThread;
-    QThread m_audioThread;
     QAtomicInteger<bool> m_running;
     QAtomicInteger<bool> m_paused;
     QAtomicInteger<bool> m_recordingStarted;
@@ -66,7 +62,6 @@ private:
     QElapsedTimer m_timer;
     QElapsedTimer m_previewThrottle;
     NDIlib_recv_instance_t m_recv;
-    AudioDeviceManager m_audioManager;
     qint64 m_pausedDurationMs;
     qint64 m_pauseStartMs;
 };

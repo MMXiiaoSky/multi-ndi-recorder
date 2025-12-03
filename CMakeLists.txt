@@ -29,7 +29,6 @@ find_library(AVFORMAT_LIBRARY NAMES avformat PATHS ${_ffmpeg_search_paths} PATH_
 find_library(AVCODEC_LIBRARY NAMES avcodec PATHS ${_ffmpeg_search_paths} PATH_SUFFIXES lib bin)
 find_library(AVUTIL_LIBRARY NAMES avutil PATHS ${_ffmpeg_search_paths} PATH_SUFFIXES lib bin)
 find_library(SWSCALE_LIBRARY NAMES swscale PATHS ${_ffmpeg_search_paths} PATH_SUFFIXES lib bin)
-find_library(SWRESAMPLE_LIBRARY NAMES swresample PATHS ${_ffmpeg_search_paths} PATH_SUFFIXES lib bin)
 
 if (NOT NDI_LIBRARY)
     message(FATAL_ERROR "Could not find Processing.NDI.Lib.x64. Set NDI_SDK_LIB to the NDI SDK library directory (lib or bin).")
@@ -53,7 +52,7 @@ target_link_libraries(${PROJECT_NAME}
     # NDI SDK
     ${NDI_LIBRARY}
     # FFmpeg
-    ${AVFORMAT_LIBRARY} ${AVCODEC_LIBRARY} ${AVUTIL_LIBRARY} ${SWSCALE_LIBRARY} ${SWRESAMPLE_LIBRARY}
+    ${AVFORMAT_LIBRARY} ${AVCODEC_LIBRARY} ${AVUTIL_LIBRARY} ${SWSCALE_LIBRARY}
     # Windows libs
     mfplat mfreadwrite mfuuid strmiids ole32 oleaut32 uuid winmm
 )

@@ -7,7 +7,6 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>
-#include <libswresample/swresample.h>
 }
 
 struct RecordingConfig
@@ -23,9 +22,6 @@ struct RecordingConfig
     int fpsDen = 1;
     AVPixelFormat inputPixFmt = AV_PIX_FMT_RGBA;
     AVPixelFormat outputPixFmt = AV_PIX_FMT_YUV420P;
-    int audioSampleRate = 48000;
-    AVSampleFormat audioSampleFmt = AV_SAMPLE_FMT_FLTP;
-    int audioChannels = 2;
 };
 
 class FfmpegWriter
@@ -37,7 +33,6 @@ public:
     bool start(const RecordingConfig &cfg);
     void stop();
     bool writeVideoFrame(AVFrame *frame);
-    bool writeAudioFrame(AVFrame *frame);
     bool needsRollover();
     void rollover();
 
@@ -53,11 +48,8 @@ private:
     RecordingConfig m_cfg;
     AVFormatContext *m_fmtCtx;
     AVStream *m_videoStream;
-    AVStream *m_audioStream;
     AVCodecContext *m_videoCodecCtx;
-    AVCodecContext *m_audioCodecCtx;
     SwsContext *m_sws;
-    SwrContext *m_swr;
     AVFrame *m_convertedFrame;
     qint64 m_startMs;
     QString m_currentFile;
